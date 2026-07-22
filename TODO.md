@@ -17,6 +17,33 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `ats.resolve`) was written I/O-free specifically so a `pytest` suite drops in
   without refactoring; deferred by choice to get a dev version running first.
 
+## What needs you (setup before the first run)
+
+These steps create billed accounts and set secrets, so they can't be automated
+from inside the agent — run them yourself. Full commands are in the README
+→ Deployment; this is the checklist.
+
+- [ ] **Turso database.** Install the Turso CLI, then `turso auth signup`,
+  `turso db create job-search-agent`, and capture the URL
+  (`turso db show job-search-agent --url`) and a token
+  (`turso db tokens create job-search-agent`). Put both in a local `.env`
+  (copy `.env.example`), then run `uv run jsa init-db` to create the table.
+- [ ] **API keys.** Create an Anthropic API key (billing enabled — A-day runs
+  are Opus deep-research sessions) and a Perplexity API key; add both to `.env`.
+- [ ] **First live searches.** Run `uv run jsa search --agent claude` and
+  `uv run jsa search --agent perplexity` by hand. These are the first real
+  validation of Step 1 and of the still-open **B-day liveness parity** question
+  (see below) — compare output quality via the `search_agent` column. Watch the
+  first few A-day (Opus) runs' spend before trusting the cron.
+- [ ] **Fly.io deployment.** `fly auth signup`/`login`, `fly launch --no-deploy`
+  (reuses the committed `fly.toml`), `fly secrets set` the four secrets, then
+  smoke-test with a one-off `fly machine run . --rm` before creating the
+  scheduled machine (`fly machine run . --schedule daily`) at your intended ET
+  morning hour.
+- [ ] **Publish (optional).** The repo is intended as a public portfolio piece
+  once you're ready; push to a public GitHub remote on your personal account
+  (not Keywell). `base_resume.docx` stays gitignored.
+
 ## Empty sections to fill
 
 - [x] **Job Fit** (Step 3) — resolved: deterministic `!`-invoked CLI review loop (no LLM per posting), opens each `url` in the browser, records `decision` (`Apply`/`Skip`) + optional `fit_feedback` to Turso; no automated pre-scoring. See "Job Fit Feedback" in `prd.md`.
