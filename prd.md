@@ -112,7 +112,7 @@ The Turso (libSQL) database holds the structured search output, the insert-idemp
 | `fit_feedback` | Optional free-text feedback from user. |
 | `added_to_tracker` | Boolean. `1` (True) indicates that the row has been added to the application tracker in Google Sheets.
 
-**Free-text feedback and ground truth.** The `fit_feedback` field is optional but central to the system's learning loop. While `decision` gives a filterable signal, the free-text captures *why* a posting does or doesn't fit — nuance the ordinal rating can't. This qualitative feedback is the primary raw material the daily prompt-updating cron job (Step 1 / the "ground truth" refinement in Step 2) draws on to refine future searches. Capturing it verbatim, even when sparse, materially improves search quality over time; it should never be required, but it should always be easy to add during the Step 3 review session.
+**Free-text feedback and ground truth.** The `fit_feedback` field is optional but central to the system's learning loop. While `decision` gives a filterable signal, the free-text captures *why* a posting does or doesn't fit — nuance the ordinal rating can't. This qualitative feedback is the primary raw material the daily prompt-updating cron job (the "ground truth" refinement of the Step 1 search prompt, fed by Step 3 feedback) draws on to refine future searches. Capturing it verbatim, even when sparse, materially improves search quality over time; it should never be required, but it should always be easy to add during the Step 3 review session.
 
 ### Job Fit Feedback
 
@@ -202,6 +202,8 @@ You have access to two data sources that can assist you in making your determina
 ## Architecture
 
 The system is split between a headless cloud runtime and interactive local sessions, coordinated through a single hosted database.
+
+**Language/runtime: Python (decided 2026-07-21).** One language across cloud and local: the cloud cron uses the Claude Agent SDK for Python plus the Perplexity and Turso (libSQL) clients and the HTML→Markdown step; the local Steps 3–5 tooling (review CLI, `.docx`/`.pdf` generation) is also Python — the `.docx`/`.pdf` ecosystem is what tipped the choice.
 
 **Hosting: Fly.io (cron) + Turso (database).**
 
