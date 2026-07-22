@@ -107,4 +107,47 @@ date inside the container (even day-of-year = Claude, odd = Perplexity).
 
 ## How this was built
 
-_(Portfolio section — completed alongside the implementation: the spec-first workflow, the decision log in `TODO.md`, and how Claude Code drove the build.)_
+This repo is also a worked example of how I build with AI coding tools.
+
+**Spec before code.** The system was fully specified in prose before a line of
+Python existed. [`prd.md`](./prd.md) is the source of truth; [`TODO.md`](./TODO.md)
+is a running decision log where open questions live as checkboxes until they're
+resolved (and *why* they resolved the way they did). Load-bearing choices — the
+cloud/local split, one hosted database with no copies, a single idempotency
+mechanism, four supported ATS platforms as an inclusion criterion — were argued
+out in that doc, not discovered mid-implementation.
+
+**Plan, then execute in reviewable slices.** Implementation followed an approved
+plan built in phases (data layer → ATS capture → search runners → pipeline/CLI
+→ review loop → deployment), each ending in a green lint pass and a single
+focused commit that references the PRD section it implements. The git history is
+meant to be read.
+
+**Verify against reality, not just types.** The four ATS fetchers were validated
+live end-to-end against real public boards (GitLab/Greenhouse, Lever, Ashby,
+Rippling) before being trusted — which is how the Rippling detail-record shape
+(a `role`+`company` HTML dict, not a plain string) and the canonical-title /
+`title_slug` consistency gap were caught and fixed, with the fixes fed back into
+`prd.md`.
+
+**Design principles in the code.** Pure logic (URL canonicalization, name
+derivation, output parsing, ATS URL resolution) is kept free of I/O so it is
+trivially testable; the single idempotency mechanism is enforced at the database
+layer; and failures in full-JD capture degrade gracefully (a row inserts with a
+`NULL` description rather than being dropped).
+
+## Project layout
+
+```
+src/jsa/
+  config.py          env-based configuration (.env locally, Fly secrets in cloud)
+  canonicalize.py    URL -> canonical idempotency key (pure)
+  naming.py          filesystem-safe company / title-slug derivation (pure)
+  models.py          pydantic models for the postings JSON contract
+  db.py              the single Turso `postings` table + idempotent insert
+  ats/               full-JD capture: resolve URL -> fetch detail -> HTML->MD
+  search/            Step 1 runners (Claude / Perplexity) + prompt + parser
+  pipeline.py        Steps 1->2 orchestration
+  review.py          Step 3 deterministic review loop
+  cli.py             the `jsa` command-line entry point
+```
