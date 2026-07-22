@@ -1,2 +1,23 @@
+# --- Personal data (never published) ---
 base_resume.docx
+
+# --- Secrets ---
+.env
+
+# --- Python ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# --- Local throwaway dev databases ---
+*.db
+*.db-journal
+*.sqlite
+
+# --- OS ---
 .DS_Store
