@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import libsql_client
 
 from .config import Config
+from .naming import slugify_title
 
 # Indicative column set per prd.md "postings columns". decision is nullable
 # until Step 3; added_to_tracker/jd_markdown/location fill in later steps.
@@ -108,20 +109,23 @@ def update_jd_capture(
     client: libsql_client.ClientSync,
     posting_id: int,
     *,
-    jd_markdown: str,
+    jd_markdown: str | None,
     location: str | None,
     title: str | None,
 ) -> None:
     """Store the full-JD fetch results on a row.
 
     On a successful ATS detail fetch the canonical ``title`` replaces the search
-    agent's transcription (the two agents transcribe titles inconsistently); a
-    ``None`` title leaves the existing value untouched.
+    agent's transcription (the two agents transcribe titles inconsistently), and
+    ``title_slug`` is re-derived from it so the Step 4 application-packet naming
+    carries the canonical title too (per prd.md). A ``None`` title leaves both
+    the existing title and slug untouched.
     """
     if title:
         client.execute(
-            "UPDATE postings SET jd_markdown = ?, location = ?, title = ? WHERE id = ?",
-            [jd_markdown, location, title, posting_id],
+            "UPDATE postings SET jd_markdown = ?, location = ?, title = ?, title_slug = ? "
+            "WHERE id = ?",
+            [jd_markdown, location, title, slugify_title(title), posting_id],
         )
     else:
         client.execute(
