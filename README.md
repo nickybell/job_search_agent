@@ -54,7 +54,56 @@ uv run jsa search --agent perplexity --window-hours 72   # explicit agent + wind
 uv run jsa review                              # work through the fit-review backlog
 ```
 
-A full local + Fly.io runbook is added as the deployment is built out.
+## Deployment (Fly.io + Turso)
+
+Steps 1–2 run headless on a Fly.io Machine that wakes daily, runs one search, and
+stops. Steps 3 (and later 4–5) run locally against the same Turso database.
+
+> The commands below are run **by you** — they create billed accounts and set
+> secrets that must never pass through an agent transcript.
+
+**1. Turso database.** Install the [Turso CLI](https://docs.turso.tech/cli/installation), then:
+
+```bash
+turso auth signup
+turso db create job-search-agent
+turso db show job-search-agent --url          # -> TURSO_DATABASE_URL
+turso db tokens create job-search-agent       # -> TURSO_AUTH_TOKEN
+```
+
+Put both in your local `.env`, then `uv run jsa init-db` to create the table.
+
+**2. API keys.** Create an [Anthropic API key](https://console.anthropic.com/) (with
+billing enabled — A-day runs are Opus deep-research sessions) and a
+[Perplexity API key](https://www.perplexity.ai/settings/api). Add both to `.env`
+for local runs.
+
+**3. Fly app + secrets.** Install [flyctl](https://fly.io/docs/flyctl/install/), then:
+
+```bash
+fly auth signup                # or: fly auth login
+fly launch --no-deploy         # reuses the committed fly.toml
+fly secrets set \
+  TURSO_DATABASE_URL="libsql://..." \
+  TURSO_AUTH_TOKEN="..." \
+  ANTHROPIC_API_KEY="sk-ant-..." \
+  PERPLEXITY_API_KEY="pplx-..."
+```
+
+**4. Smoke-test once, then schedule.** Run a one-off machine (no schedule) and
+check logs + new Turso rows before letting the cron ride:
+
+```bash
+fly machine run . --rm                                  # one-off; exits after one search
+fly machine run . --schedule daily --restart on-fail    # daily at ~the creation time (ET)
+```
+
+Because the schedule fires ~24h after machine creation, create the scheduled
+machine at your intended morning hour. The A/B agent self-selects from the run
+date inside the container (even day-of-year = Claude, odd = Perplexity).
+
+> **Cost note:** watch the first few A-day (Claude Opus) runs' spend before
+> trusting the cron unattended.
 
 ## How this was built
 

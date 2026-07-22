@@ -1,0 +1,13 @@
+# Fly.io app config for the headless Steps 1-2 cron.
+#
+# There is no HTTP service: a Fly Machine wakes on schedule, runs one `jsa
+# search`, and stops. Create the scheduled machine at the desired ET morning
+# hour (see README -> Deployment) so the ~24h schedule fires each morning.
+app = "job-search-agent"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TZ = "America/New_York"
