@@ -2,6 +2,21 @@
 
 Gaps to close in `prd.md` before it's ready for implementation planning.
 
+## Implementation status (2026-07-21)
+
+**Steps 1–3 are implemented** on the `implement-steps-1-3` branch (Python, uv,
+`src/jsa/`): the A/B search runners, canonical-URL idempotent insert, full-JD
+capture from all four supported ATS platforms (verified live), the deterministic
+review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
+
+**Deferred, tracked for later:**
+- Steps 4–5 (per-job resume revisions; write-only Google Sheet tracker).
+- The ground-truth prompt-refinement cron (mechanism still undesigned — see below).
+- The direct job-add path (below).
+- Test suite + CI hardening: pure logic (`canonicalize`, `naming`, `parse`,
+  `ats.resolve`) was written I/O-free specifically so a `pytest` suite drops in
+  without refactoring; deferred by choice to get a dev version running first.
+
 ## Empty sections to fill
 
 - [x] **Job Fit** (Step 3) — resolved: deterministic `!`-invoked CLI review loop (no LLM per posting), opens each `url` in the browser, records `decision` (`Apply`/`Skip`) + optional `fit_feedback` to Turso; no automated pre-scoring. See "Job Fit Feedback" in `prd.md`.
