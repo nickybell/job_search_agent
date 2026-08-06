@@ -84,7 +84,7 @@ for local runs.
 fly auth signup                # or: fly auth login
 fly launch --no-deploy         # reuses the committed fly.toml
 fly secrets set \
-  TURSO_DATABASE_URL="libsql://..." \
+  TURSO_DATABASE_URL="libsql://..." \   # the libsql:// URL from `turso db show --url`
   TURSO_AUTH_TOKEN="..." \
   ANTHROPIC_API_KEY="sk-ant-..." \
   PERPLEXITY_API_KEY="pplx-..."
