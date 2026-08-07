@@ -80,7 +80,14 @@ def connect(config: Config) -> Connection:
         url=config.turso_database_url,
         auth_token=config.turso_auth_token,
     )
-    client.autocommit = True
+    # turso_serverless mirrors stdlib sqlite3's *legacy* transaction model:
+    # isolation_level=None is what actually enables autocommit. The DB-API
+    # `autocommit` attribute it also exposes is merely stored (`_autocommit_mode`)
+    # and never consulted by execute/commit, so setting it is a no-op — every DML
+    # would open an implicit BEGIN DEFERRED that close() rolls back, silently
+    # dropping the write. Setting isolation_level=None is what the review loop
+    # (and the pipeline insert) rely on to persist each statement immediately.
+    client.isolation_level = None
     return client
 
 
