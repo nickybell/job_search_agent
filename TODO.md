@@ -19,17 +19,6 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 
 ## What needs you (setup before the first run)
 
-These steps create billed accounts and set secrets, so they can't be automated
-from inside the agent — run them yourself. Full commands are in the README
-→ Deployment; this is the checklist.
-
-- [ ] **Turso database.** Install the Turso CLI, then `turso auth signup`,
-  `turso db create job-search-agent`, and capture the URL
-  (`turso db show job-search-agent --url`) and a token
-  (`turso db tokens create job-search-agent`). Put both in a local `.env`
-  (copy `.env.example`), then run `uv run jsa init-db` to create the table.
-- [ ] **API keys.** Create an Anthropic API key (billing enabled — A-day runs
-  are Opus deep-research sessions) and a Perplexity API key; add both to `.env`.
 - [ ] **First live searches.** Run `uv run jsa search --agent claude` and
   `uv run jsa search --agent perplexity` by hand. These are the first real
   validation of Step 1 and of the still-open **B-day liveness parity** question
@@ -44,25 +33,11 @@ from inside the agent — run them yourself. Full commands are in the README
   once you're ready; push to a public GitHub remote on your personal account
   (not Keywell). `base_resume.docx` stays gitignored.
 
-## Empty sections to fill
+## Empty PRD sections to fill
 
-- [x] **Job Fit** (Step 3) — resolved: deterministic `!`-invoked CLI review loop (no LLM per posting), opens each `url` in the browser, records `decision` (`Apply`/`Skip`) + optional `fit_feedback` to Turso; no automated pre-scoring. See "Job Fit Feedback" in `prd.md`.
-- [x] **Resume Revisions** (Step 4) — resolved: an agentic slash command queries `Apply` rows not yet in the tracker (with a directory-exists filesystem fallback against partial DB writes) and fans out one subagent per row; each builds a `~/Documents/Job Applications/{normalized_company} - {title_slug}` packet (`job_posting.md` + `.docx`/`.pdf`). The tailoring instructions themselves remain `TK` (hand-authored). See "Resume Revisions" in `prd.md`.
-- [x] **Application Tracker** (Step 5) — resolved: write-only Google Sheet `Job Search Application Tracker` (ID `1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4`), appended via the local `gws` CLI (personal `nicky.bell@gmail.com` OAuth, GCP project `job-search-agent-502402`) when the Step 4 packet is generated. 7 columns (Company/Title/URL/Date Posted verbatim; Date Added agent-set; Date Applied/Status user-filled with a validated, color-coded Status dropdown). See "Application Tracker (Google Sheets)" in `prd.md`.
 - [ ] **Search Prompt Updates from "Ground Truth"** — the mechanism by which `fit_feedback` refines the Step 1 search prompt on the daily cron.
-- [x] **Deep research prompt** — authored in `deep_research_prompt.md`: candidate profile, target titles, non-negotiable filters (location + missing-comp rule), named sources, inline output JSON contract, `{{SEARCH_WINDOW}}` template slot, liveness/verifiability hard gates (employer job index as source of truth, no guessed dates, no gate relaxation for volume — added 2026-07-14; per-ATS JSON list-endpoint verification added 2026-07-21 after smoke testing surfaced orphaned Greenhouse detail pages; supported-ATS whitelist made an inclusion criterion — four platforms only — later that day), and a 5–10-companies/day volume + de-dup expectation. (Positive/negative language-signal sections deliberately left as-is for now.)
-
-## Open decisions inside otherwise-finished sections
-
-- [x] **Language/runtime** — resolved 2026-07-21: **Python** across all steps (Claude Agent SDK for Python; the `.docx`/`.pdf` tooling was the deciding factor). Recorded in `prd.md` (Architecture).
-- [x] **Similarity threshold** — obsolete twice over: on 2026-07-21 stage-2 embeddings were replaced by a deterministic normalized `(company, title, location)` match, and later that day stage 2 was removed entirely — dedup is now just canonical-URL insert idempotency (see "Insert Idempotency" in `prd.md`). No threshold, and no Voyage dependency, exists anymore.
-- [x] **`jd_markdown` conversion tooling** — resolved 2026-07-21: **`markdownify`** (ATX headings). Greenhouse `content` is `html.unescape`d before conversion; the other three serve real HTML. Rippling's v2 per-job record (`ats.rippling.com/api/v2/board/{board}/jobs/{id}`) was verified live to expose the full description as a dict of HTML sections (`role` + `company`), title as `name`, and locations as a `workLocations` list — all four platforms confirmed end-to-end (real title/location/JD). See `src/jsa/ats/`.
-- [ ] **Supported-ATS coverage** — on 2026-07-21 the prompt made the four supported ATS platforms (Greenhouse, Lever, Ashby, Rippling) an *inclusion* criterion: postings anywhere else (Workday, custom careers sites, other ATS) are out of scope and never investigated, so research turns go to discovery instead of bespoke verification. If Step 3 review shows meaningful roles being missed, the first fix is additive — extend the endpoint table with other ATS that expose public JSON list endpoints (SmartRecruiters, Workable, Recruitee) *and* teach the Step 2 full-JD fetch their detail-record shapes. A pipeline-side Workday CxS POST verifier remains the deeper fallback — which would reopen the 2026-07-14 no-pipeline-liveness-check decision.
-- [ ] **B-day liveness parity** — *(Decision 2026-07-21: build the B-day runner as specified rather than smoke-testing first; evaluate parity empirically from real runs via the `search_agent` column before revisiting.)* Perplexity Pro Search reads the same prompt. Researched 2026-07-21: Sonar Pro's "Pro Search" mode (`search_type: "pro"`, requires `stream: true`) does orchestrate a model-driven `fetch_url_content` tool alongside `web_search`, so an explicit instruction to fetch a constructed ATS list-endpoint URL is plausible in principle. Two unresolved risks: (1) `fetch_url_content` is documented as *content extraction* for pages/articles ("beyond search result snippets," comparable to the separate Agent API's `fetch_url`, which "extracts content into snippets... may be truncated") — unclear whether an exact ID-presence check survives that extraction on a raw JSON response; (2) whether the model reliably constructs the derived slug/token URL and chooses to fetch it, versus defaulting to `web_search`, is unverified without a live test (this is exactly the instruction-following gap `prd.md` cites as the reason A-day uses Opus 4.8 at `xhigh` over a cheaper model). Also confirm `perplexity/pro-search-request` (the identifier named in `prd.md`) actually maps to this Pro Search mode and not plain Sonar Pro (no fetch tool) or the newer Agent API, once the B-day runner is implemented. No prompt change needed for now: the liveness gate already treats any fetch failure/uncertainty as exclude, so the worst case is reduced B-day volume, not a reintroduced orphaned-page false positive. Smoke-test a B-day run against the same known-orphaned posting used for the A-day test once the runner exists.
-- [x] **Decision values** — resolved: the field is `decision` with two values, `Apply` / `Skip` (superseding the earlier `fit_rating` `Fit`/`Not a Fit` naming; see "Job Fit Feedback" in `prd.md`).
 
 ## Cross-cutting gaps not owned by any section
 
-- [x] **Step 3 → 4 handoff seam** — resolved: an `Apply` decision records + queues the row rather than inline-triggering resume work; a separate agentic slash command drafts revisions by fanning out one subagent per just-marked-`Apply` row. Notification: resolved — no notification (check-when-you-feel-like-it); the daily Fly search accumulates postings regardless of review cadence and the `NULL decision` query surfaces the backlog on demand.
 - [ ] **Direct job-add path** — the Database section mentions Nicky providing jobs directly, but the ingestion route (does it run the canonical-URL idempotent insert and the full-JD fetch? where?) is unspecified. *(Deferred out of the Steps 1–3 implementation plan, 2026-07-21; natural shape is a CLI subcommand reusing Step 2's canonicalize → insert → JD-fetch on a user-supplied ATS URL.)*
 - [ ] **`.docx`/`.pdf` tooling** for Step 5 (pandoc? docx library + LibreOffice?) — affects local setup.

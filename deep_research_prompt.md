@@ -7,21 +7,22 @@ You are a deep research agent. You are tasked with conducting a wide search for 
 
 ## Candidate
 
-Nicky Bell is a Ph.D.-educated operations, product, and analytics leader based in Washington, DC, transitioning from a Chief of Staff role into a Customer Education, Customer Enablement, or Community role. He is strongest where technical depth meets pedagogy -- translating complex AI/data products into learning that changes what people can do. He has designed curricula and courses, trained 500+ operators and leaders on AI tools, led cross-functional teams by influence, and is fluent in agentic AI and LLM tooling. Target seniority is Manager through VP / Head-of.
+Nicky Bell is a Ph.D.-educated enablement, product, and analytics leader based in Washington, DC, targeting Customer Enablement, Customer Education, and AI Enablement leadership roles. His operating thesis: products win when customers change how they work, and AI should be deployed to create 10x humans rather than replace them -- adoption stalls are behavior and identity problems, not feature problems. He is strongest where technical depth meets pedagogy -- translating complex AI/data products into learning that changes what people can do. He has designed curricula and courses at the strategy level, trained 500+ operators on judgment in AI-assisted analysis, led the data science behind a first-of-its-kind FDA approval, deployed internal AI agents, and is fluent in agentic AI and LLM tooling. Target seniority is Manager through VP / Head-of.
 
 ## Target roles and titles
 
-Seed your searches with the titles below and their obvious variants (British/American spelling, "Sr."/"Senior" prefixes, singular/plural). Titles combine freely -- treat multi-hyphenate and blended roles (e.g. "Customer Education & Community," "Enablement & Training") as in-scope.
+Seed your searches with the titles below and their obvious variants (British/American spelling, "Sr."/"Senior" prefixes, singular/plural). Titles combine freely -- treat multi-hyphenate and blended roles (e.g. "Customer Education & Enablement," "AI Enablement & Change Management") as in-scope.
 
-- **Customer Education** -- Head / Manager / Director / VP of Customer Education
 - **Customer Enablement** -- Head / Manager / Director / VP of Customer Enablement
+- **Customer Education** -- Head / Manager / Director / VP of Customer Education
+- **AI Enablement / AI Adoption** -- Head / Manager / Director / VP of AI Enablement, AI Adoption, AI Transformation, or AI Training / Upskilling / Literacy / Fluency. Internal, employee-facing charters (enabling a company's own workforce on AI) are just as in-scope as customer-facing ones -- treat them as a primary target, not an adjacency.
 - **Customer Experience** -- Head / Manager / Director / VP of Customer Experience (CX)
-- **Community** -- Head / Manager / Director / VP of Community
 - **Adjacent / commonly-blended** -- Head of Academy / Head of [Company] University; Customer or Developer Education; Technical Curriculum Developer; Learning & Development (customer-facing / senior); Developer Relations or Developer Advocacy with an education/enablement charter; Instructional Design (senior, customer-facing)
 
 ## Non-negotiable filters
 
 - **Location:** Fully remote, or hybrid/in-person in the greater Washington, D.C. area. The greater D.C. area means Washington, D.C. itself plus its Maryland and Northern Virginia suburbs -- including (not exhaustively) Arlington, Alexandria, Tysons / Tysons Corner, McLean, Vienna, Falls Church, Fairfax, Reston, Herndon, and Crystal City / National Landing in Virginia, and Bethesda, North Bethesda, Chevy Chase, Rockville, Gaithersburg, Silver Spring, and College Park in Maryland. A posting naming any of these localities counts as in-area; for a locality not listed, the test is whether the office is within commuting distance of Washington, D.C. Resolve ambiguous remote postings this way: "remote (US)" / "remote, US" -> include; remote restricted to a non-US region or an incompatible timezone -> exclude; hybrid or on-site -> include only if the office is in the area defined above.
+- **Industry:** Exclude any employer whose core business is healthcare, health tech, pharma, or insurance. This is a company-level test on the employer's primary business, not on the role's content -- an education role at a health-insurance company is out, while a horizontal product that merely sells into healthcare among other verticals is in. Unlike the fit signals below, this is a hard filter: do not surface these for downstream review.
 - **Salary:** Minimum base salary $165,000. **Apply this only when a range is actually published:** exclude a posting only if its stated range tops out below $165,000. Most postings omit compensation -- a posting with no stated salary is *included*, never dropped for missing comp. (Recall over precision: a borderline or unstated-comp role is Step 3's call, not the search agent's.)
 - **Search window:** Only include postings published or updated within {{SEARCH_WINDOW}}, judged by the recency rules in "Liveness and verifiability" below. When the employer's page and an aggregator disagree about a posting's age, the employer's date wins.
 - **No "Lead" Roles:** Head, Manager, Director, and VP roles are all acceptable for inclusion. The specific terminology "Lead" -- which is typically used in the United States to designate a senior IC role -- should not be included in search results.
@@ -35,12 +36,14 @@ Search the near-universe of sources available to you for *discovery*. Treat each
 At minimum, cover:
 
 - **Search-engine queries scoped directly to the four supported ATS domains** — the highest-yield source, since every hit is already on a verifiable host: `site:boards.greenhouse.io`, `site:job-boards.greenhouse.io`, `site:jobs.lever.co`, `site:jobs.ashbyhq.com`, and `site:ats.rippling.com`, each combined with the target titles above.
+- **EchoJobs (`echojobs.io`), treated as a peer of the ATS-scoped queries** — unlike consumer aggregators, EchoJobs is scraped from company ATS boards and each listing links out to the *original* ATS posting (Greenhouse/Lever/Ashby/Rippling), so its hits arrive already resolvable to a verifiable host. Query it (`site:echojobs.io` plus the target titles, or its on-site search), then follow each result through to the underlying ATS URL and validate that URL with the list-endpoint check like any other posting. This is high-yield for the same reason the `site:` ATS queries are — the source only ever points at hosts we can verify.
 - ATS-indexing meta-search, which has better freshness and far fewer ghost postings than consumer aggregators: hiring.cafe, Simplify, Jobright, Google Jobs.
 - LinkedIn Jobs.
-- Aggregators and curated boards: Built In (national and DC), Otta / Welcome to the Jungle, Wellfound, and the AI-specific boards (ai-jobs.net, Cerebral Valley).
-- Remote-first boards, given the remote location filter: We Work Remotely, Remotive.
-- Niche boards for this space: CMX Hub, The Community Club, Rosieland; The Learning Guild; DevRel Collective, devrel.jobs; Gain Grow Retain, Customer Success Collective, Sales Enablement Collective.
+- Aggregators and curated boards: Built In (national and DC), Otta / Welcome to the Jungle, Wellfound, The Muse, and the AI-specific boards (ai-jobs.net, Cerebral Valley).
+- Remote-first boards, given the remote location filter: We Work Remotely, Remotive, and Himalayas (better-curated, with real seniority and role-category filters — favor it for senior CX/enablement over raw remote feeds).
+- Niche boards for this space: The Learning Guild; DevRel Collective, devrel.jobs; Gain Grow Retain, Customer Success Collective, Sales Enablement Collective.
 - VC and accelerator portfolio boards — high-yield because growth-stage AI companies standing up an education function for the first time often post only there, and their boards link straight through to the underlying ATS posting: a16z, Sequoia, Bessemer, Insight, General Catalyst, First Round, YC. Many run on Getro or Consider, so searching the platform domain hits many funds at once.
+- The current monthly Hacker News “Ask HN: Who is hiring?” thread — high-signal for the same 0-to-1, first-enablement-hire startups the VC boards surface: seed/early-stage companies standing up an education or enablement function post there, and top-level comments routinely link straight to the company's ATS posting, so many hits resolve directly to a supported host. Noisy, so lead with the target titles as in-thread search terms.
 
 ## Output
 
@@ -67,10 +70,11 @@ Expect qualifying postings from roughly **5-10 distinct companies per 48-hour wi
 
 ## Reading the Posting: Signals and Exclusions
 
-Job postings encode what a role actually is. The language below splits into two tiers with distinct behaviors:
+Job postings encode what a role actually is. The language below splits into three tiers with distinct behaviors:
 
 1. **Positive signals** -- use as search-query seeds and as confirmation a posting is in-scope.
-2. **Hard exclusions** -- the only content-based reasons to drop a posting (beyond the non-negotiable filters above).
+2. **Negative signals** -- never by themselves a reason to exclude; they only steer effort allocation (see that section).
+3. **Hard exclusions** -- the only content-based reasons to drop a posting (beyond the non-negotiable filters above).
 
 When in doubt, include -- recall over precision.
 
@@ -83,25 +87,41 @@ Use these phrases as search queries in their own right, and as confidence that a
 - "Meet learners where they are," "learner-centered"
 - "Help customers succeed with," "drive adoption through education," "reduce time-to-value"
 - "Democratize," "make [complex thing] accessible," "translate technical concepts for non-technical audiences"
-- AI/product framing that centers augmentation: "help people do more with AI," "AI literacy," "responsible AI adoption"
+- AI/product framing that centers augmentation: "help people do more with AI," "AI literacy," "responsible AI adoption," "augment, not replace," "make people better at their jobs"
+- Adoption-as-change-management framing: "drive AI adoption," "AI transformation," "change management," "upskill the workforce," "build AI fluency across teams," "champion new ways of working"
+- "Build trust in AI," "human-in-the-loop," teaching judgment and critical thinking about AI outputs (not just tool mechanics)
 
 **The actual work (strong fit)**
 - "Design and build curriculum / courses / learning paths / certification programs"
 - "Create technical content, tutorials, docs, workshops, webinars"
 - "Develop and deliver enablement / onboarding programs"
-- "Build and nurture a community," "grow an ambassador / champion / advocate program"
 - "Run customer discovery," "translate customer needs into," "voice of the customer"
 - "Measure learning outcomes / engagement / adoption / activation" (product-minded education)
 - "Cross-functional," "partner with product / sales / support / marketing," "influence without authority"
 
 **Scope and altitude**
 - "Own," "build from zero," "stand up," "define the strategy for," "first [role] hire," "0-to-1"
+- "Own what gets taught and why," "define the education / enablement strategy" (strategy-level ownership, not delivering someone else's curriculum)
 - "Player-coach," "build and lead a team," "scale a function"
 - "Report to [VP/C-level]," strategic seat with autonomy
 
 **Culture and craft**
 - Emphasis on writing quality, clarity, pedagogy, storytelling
 - "Experimentation," "iterate," "build in public," developer-experience mindset
+
+**Company and problem space**
+- AI applied to an old, human-centered problem (customer retention, demand forecasting, learning, hiring) rather than a thin AI wrapper or pure category creation
+- Products whose adoption requires users to change how they work -- where the blocker is behavior and trust, not features
+
+### Negative signals (deprioritize, never exclude)
+
+None of these is a reason to drop a posting -- borderline calls stay with the downstream human review. Their only effect is on effort allocation: when the research budget is tight, spend verification turns on postings without them first.
+
+- Delivery-only education: "facilitate training developed by others," "administer the LMS," "deliver our existing curriculum," tool-mechanics training with no ownership of what gets taught or why
+- Enablement housed inside Revenue Operations, or success measured in pipeline, quota, or bookings terms
+- AI framed as headcount efficiency: automation pitched as replacing people or "doing more with less" rather than making people more capable
+- Purely deterministic, back-office problem spaces with no human-behavior dimension: supply-chain optimization, data normalization, infrastructure tooling
+- Agency-style bespoke client delivery with no compounding product or program
 
 ### Hard exclusions (title-level only)
 
@@ -110,8 +130,11 @@ Exclude a posting for its content only when the **title itself** is disqualifyin
 - Quota-carrying sales titles: SDR, BDR, AE / Account Executive, Account Manager, or any title where sales is the function
 - Junior titles: Associate, Coordinator, Assistant, Intern
 - Pure social-media titles: Social Media Manager / Coordinator
+- Pure community titles: Head / Manager / Director / VP of Community, Community Manager -- out of scope unless the title itself carries an education or enablement charter (e.g. "Education & Community")
+- Chief of Staff titles
+- Revenue Operations / RevOps titles
 
-(The non-negotiable filters above -- location, salary, search window, "Lead" -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
+(The non-negotiable filters above -- location, industry, salary, search window, "Lead" -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
 
 ## Liveness and verifiability (hard gates)
 

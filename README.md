@@ -1,6 +1,6 @@
 # Job Search Agent
 
-A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **daily search** for Customer Education / Enablement / Community roles, stores each posting **exactly once** (with its full job description), and collects fit feedback through a fast terminal review loop.
+A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **daily search** for Customer Enablement / Education / AI Enablement roles, stores each posting **exactly once** (with its full job description), and collects fit feedback through a fast terminal review loop.
 
 > This repository doubles as a portfolio example of building a real system with AI coding tools. The design was worked out as a written spec **before** any code: [`prd.md`](./prd.md) is the source of truth, [`TODO.md`](./TODO.md) tracks open decisions, and [`deep_research_prompt.md`](./deep_research_prompt.md) is the search prompt itself. See [How this was built](#how-this-was-built).
 

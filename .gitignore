@@ -19,5 +19,8 @@ build/
 *.db-journal
 *.sqlite
 
+# --- Reference clones (local pattern reference, not tracked) ---
+reference/
+
 # --- OS ---
 .DS_Store

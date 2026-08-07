@@ -2,41 +2,54 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status: pre-implementation
+## Project status
 
-This repository currently contains **only design artifacts** — there is no code, build system, or test suite yet. Do not fabricate build/lint/test commands; they don't exist. The work so far lives in:
+A personal job-search agent (Claude Agent SDK) that runs a daily search for Customer Enablement / Education / AI Enablement roles, stores postings idempotently with their full job descriptions, and collects fit feedback for a learning loop.
 
-- `prd.md` — the product requirements document and **source of truth** for what this system does. Read it in full before proposing implementation work.
-- `TODO.md` — open gaps that must be closed in `prd.md` before it is planning-ready (the ground-truth prompt-update mechanism, the runtime/language choice, `.docx`/`.pdf` and HTML→Markdown tooling, and other open decisions).
-- `base_resume.docx` — Nicky's canonical base resume; the input to the resume-revision flow (Steps 4a/5).
+**Steps 1–3 are implemented** in Python (`src/jsa/`, managed with `uv`): the A/B search runners, canonical-URL idempotent insert, full-JD capture from all four supported ATS platforms, the deterministic review loop, the `jsa` CLI, and the Fly.io deployment (`Dockerfile` + `fly.toml`).
 
-Not a git repository yet. Offer `git init` before any commit work.
+**Deferred (specified, not built):** Steps 4–5 (per-job resume revisions from `base_resume.docx`; write-only Google Sheet tracker), the ground-truth prompt-refinement cron, the direct job-add path, and a `pytest` suite. Open decisions live as checkboxes in `TODO.md`.
 
-## What this system is
+The design docs remain the source of truth and precede the code:
+- `prd.md` — product requirements and **source of truth**. The pipeline is a numbered 5-step flow (Steps 1–5, with 4a/4b); internalize that numbering — the rest of the docs reference it constantly.
+- `deep_research_prompt.md` — the actual search prompt, a template with a `{{SEARCH_WINDOW}}` slot. Carries the full output contract and liveness gates inline.
+- `TODO.md` — open decisions and the user's setup checklist.
 
-A personal job-search agent (built on the Claude Agent SDK) that runs a daily search for Customer Education / Enablement / Community roles, stores postings idempotently, collects the user's fit feedback, and generates per-job resume revisions. A learning loop feeds fit feedback back into the search prompt over time ("ground truth" refinement).
+## Commands
 
-The pipeline is a numbered 5-step flow defined in `prd.md`; internalize that numbering (Steps 1–5, with 4a/4b) since the rest of the doc and `TODO.md` reference it constantly.
+```bash
+uv sync                                                   # create venv, install deps
+uv run jsa init-db                                        # create the postings table (idempotent)
+uv run jsa search                                         # today's search (agent auto-selected by date)
+uv run jsa search --agent claude --window-hours 72        # explicit agent + window
+uv run jsa review                                         # work the fit-review backlog (local, interactive)
+uv run ruff check src                                     # lint
+uv run ruff format src                                    # format
+```
+
+- **No test suite yet.** Pure logic (`canonicalize`, `naming`, `search.parse`, `ats.resolve`) is deliberately written I/O-free so a `pytest` suite drops in without refactoring — keep new pure logic that way.
+- **Local dev without hosted Turso:** set `TURSO_DATABASE_URL=file:dev.db` in `.env` to run against a throwaway local SQLite file (the DB layer is transport-agnostic — see below).
+- **Deploy (run by the user; sets billed secrets — never via an agent transcript):** `fly launch --no-deploy` → `fly secrets set …` → `fly machine run . --rm` (one-off smoke test) → `fly machine run . --schedule daily`. Full sequence in `README.md`.
 
 ## Architecture the code must respect
 
-These are load-bearing decisions from `prd.md` — a future implementation should not quietly deviate from them:
+Load-bearing decisions from `prd.md`. Do not quietly deviate:
 
-- **Cloud/local split.** Steps 1–2 (daily search, idempotent insert) and the prompt-refinement cron run **headless on Fly.io**. Steps 3–5 (fit review, resume revisions, Google Sheet write, `.docx`/`.pdf` generation) run **locally as interactive Claude Code sessions**. This split is the reason for the hosted DB (below) and drives where each credential lives (the Perplexity key is a Fly-managed secret; Google Sheets OAuth stays local).
+- **Cloud/local split.** Steps 1–2 (search, insert) and the prompt-refinement cron run **headless on Fly.io**; Steps 3–5 (review, resume revisions, Sheet write, `.docx`/`.pdf`) run **locally**. This drives where credentials live (Perplexity key is a Fly secret; Google Sheets OAuth stays local).
+- **One hosted DB, no copies.** The JD database is **Turso (hosted libSQL)**. Both cloud cron and local sessions connect to the *same* copy — never introduce a second local SQLite file that diverges. (`file:` URLs are for throwaway dev only.) The connection goes through `turso_serverless` (DB-API 2.0 over Turso's HTTP/Hrana transport — the managed platform does not serve WebSockets); `db.connect` also enables autocommit, which the review loop depends on.
+- **Single `postings` table.** Holds search output, the `canonical_url` idempotency key, the full JD, and fit feedback only. It deliberately does **not** store application state — the Google Sheet is the write-only tracker and the agent never reads it back. Don't mirror sheet/application state into the DB.
+- **Single-mechanism insert idempotency — no dedup subsystem.** Dedup is exactly one mechanism: URL canonicalization (`canonicalize.py`) into a `UNIQUE canonical_url` + `INSERT … ON CONFLICT DO NOTHING RETURNING id`. Because the prompt requires index-linked ATS URLs, both agents converge on the same canonical URL for a req, so this also covers cross-source duplicates and makes re-runs safe. Do **not** reintroduce a second dedup stage or embeddings (both were removed by design).
+- **Full-JD capture at insert, not a liveness gate.** Only genuinely-new rows (those `insert_posting` returns an id for) get a full-JD fetch. `ats/resolve.py` maps the URL to platform/board/id; `ats/fetch.py` GETs the ATS detail record and stores `jd_markdown` (HTML→Markdown), structured `location`, and the ATS-canonical `title` (which overwrites the agent's transcription and re-derives `title_slug`). **A failed fetch never excludes a row** — it degrades to `NULL jd_markdown`.
+- **Four supported ATS = an inclusion criterion.** Greenhouse, Lever, Ashby, Rippling. Each has a distinct detail-record shape (see the per-platform fetchers in `ats/fetch.py`, verified live — e.g. Rippling's description is a `{role, company}` HTML dict, Lever falls back US→EU host, Ashby has no per-id GET so the org board is scanned). A URL that resolves to none of them is out of scope. Any other platform (Workday, custom sites) has no supported index check — do not add per-platform verification for it.
+- **A/B search alternation.** `select_agent_for_date` derives the agent from day-of-year parity (even = Claude Deep Research, odd = Perplexity Pro Search) so one cron entry self-selects. Both runners must return the `postings` JSON contract in `prd.md`; Perplexity also enforces it via `response_format`, and Pro Search **requires `stream: true`** (non-streaming silently falls back to single-step search).
+- **CLI-runnable crons.** The automated Steps 1–2 must also be invocable by hand with a parameterized window and agent — the cron and `jsa search` share `run_pipeline`.
 
-- **One hosted DB, no copies.** The JD database is **Turso (hosted libSQL, SQLite-compatible)**. Both the cloud cron and local sessions connect to the *same* copy — never introduce a second local SQLite file that would diverge.
+## How the pipeline is wired
 
-- **Single `postings` table.** It holds search output, the canonical-URL idempotency key, and fit feedback only. It deliberately does **not** store application state — the Google Sheet is the write-only application tracker, and the agent never reads back from it. Don't mirror sheet/application state into the DB.
-
-- **Single-mechanism insert idempotency — no dedup subsystem.** Dedup is exactly one mechanism: URL canonicalization into a `UNIQUE canonical_url` + `INSERT … ON CONFLICT DO NOTHING`. Because the search prompt requires index-linked ATS URLs, both agents return the same canonical URL for the same req, so this also covers cross-source duplicates — and it is what makes daily/CLI re-runs safe. The stage-2 repost `(title, location)` match and its `duplicate_of` linkage were removed 2026-07-21 (as was the still-earlier Voyage embeddings design) — do not reintroduce a second dedup stage or embeddings; rare reposts surface in Step 3 review and the user handles them.
-
-- **Full-JD capture at insert, not a liveness gate.** Step 2 GETs each surviving posting's public ATS JSON detail record and stores `jd_markdown` (HTML→Markdown) plus the ATS's structured `location` and canonical `title`; the Step 4 `job_posting.md` is built from `jd_markdown`. A failed fetch never excludes a row — the 2026-07-14 no-pipeline-liveness-check decision stands.
-
-- **A/B search alternation.** Even days use Claude Deep Research; odd days use Perplexity Pro Search. Both must return the structured `postings` JSON schema in `prd.md`. Parity is derived from the run date inside the container so one cron entry self-selects.
-
-- **CLI-runnable crons.** The automated Steps 1–2 must also be invocable from the command line with a parameterized time window and search-agent choice.
+`cli.py` → `pipeline.run_pipeline` is the daily-cron body: `search.load_prompt` (interpolates the window) → the selected runner (`search/claude_runner.py` or `search/perplexity_runner.py`) → `search.parse_search_output` → per posting: `canonicalize_url` → `db.insert_posting` (idempotent) → for new rows only, `resolve_ats_url` → `fetch_detail` → `db.update_jd_capture`. Step 3 (`review.py`) is a separate deterministic, no-LLM loop: query `NULL decision` rows, open each in Chrome, write the decision back — invoked directly (`uv run jsa review` / `!`-prefixed), never as a slash command (which would reintroduce per-posting token cost).
 
 ## Working conventions
 
-- Keep `prd.md` the source of truth. When a design decision is made in conversation, reflect it there; when something is still undecided, it belongs in `TODO.md` as a checkbox, not silently assumed in code.
-- Use `AskUserQuestion` liberally for decisions requiring judgment (the user has asked for this globally).
+- Keep `prd.md` the source of truth. Reflect design decisions made in conversation there; when a decision is still open, it belongs in `TODO.md` as a checkbox with the reasoning, not silently in code.
+- Use `AskUserQuestion` liberally for decisions requiring judgment (a global user preference).
+- `base_resume.docx` is gitignored and never committed. The repo is intended as a public portfolio piece — keep it clean.
