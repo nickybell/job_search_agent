@@ -4,7 +4,7 @@
 # as a subprocess, so the image carries Node.js + @anthropic-ai/claude-code in
 # addition to Python. The B-day (Perplexity) path is pure HTTP and needs only
 # Python; both agents share this one image and the day-of-year parity picks one.
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ENV TZ=America/New_York \
     PYTHONUNBUFFERED=1 \
