@@ -1,4 +1,4 @@
-# Job Search Agent for Customer Education and Community Roles
+# Job Search Agent for Customer Enablement and Education Roles
 
 This document outlines the goals and features of the Job Search Agent using the Claude Agent SDK.
 
