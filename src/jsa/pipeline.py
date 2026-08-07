@@ -54,6 +54,20 @@ def select_agent_for_date(now: datetime | None = None) -> str:
     return "claude" if now.timetuple().tm_yday % 2 == 0 else "perplexity"
 
 
+# The fixed weekly cadence for the daily cron: the look-back window (in hours)
+# for each search day, or absent on days we don't search. Python's weekday():
+# Mon=0 .. Sun=6. Monday reaches back across the weekend (72h); Wednesday and
+# Friday each cover the 48h since the prior run. The windows deliberately
+# overlap, so a skipped fire is recovered by the next run (and re-inserts no-op).
+CRON_WINDOWS: dict[int, int] = {0: 72, 2: 48, 4: 48}  # Mon, Wed, Fri
+
+
+def window_for_date(now: datetime | None = None) -> int | None:
+    """Look-back window (hours) for the daily cron on `now`'s ET weekday, or None to skip."""
+    now = now or datetime.now(EASTERN)
+    return CRON_WINDOWS.get(now.weekday())
+
+
 def _run_search(agent: str, prompt: str, config: Config) -> str:
     if agent == "claude":
         return run_claude_search(prompt)
@@ -72,6 +86,8 @@ def run_pipeline(
 ) -> RunSummary:
     """Run one search-and-capture cycle and return a summary of what happened."""
     summary = RunSummary(agent=agent)
+    now = now or datetime.now(EASTERN)
+    run_date = now.date().isoformat()
 
     prompt = load_prompt(window_hours, now)
     log.info("running %s search over a %dh window", agent, window_hours)
@@ -84,8 +100,10 @@ def run_pipeline(
     db.init_db(client)
     try:
         with httpx.Client(follow_redirects=True) as http:
-            for posting in output.postings:
-                _process_posting(posting, agent, client, http, summary)
+            for rank, posting in enumerate(output.postings, start=1):
+                _process_posting(
+                    posting, agent, run_date, window_hours, rank, client, http, summary
+                )
     finally:
         client.close()
 
@@ -93,8 +111,21 @@ def run_pipeline(
     return summary
 
 
-def _process_posting(posting, agent, client, http, summary: RunSummary) -> None:
+def _process_posting(
+    posting, agent, run_date, window_hours, rank, client, http, summary: RunSummary
+) -> None:
     canonical = canonicalize_url(posting.url)
+    # Log the finding for A/B attribution BEFORE the idempotent insert, so a req
+    # the insert no-ops (already present from the other agent) still credits
+    # this agent. Both agents converge on the same canonical_url by design.
+    db.record_finding(
+        client,
+        run_date=run_date,
+        agent=agent,
+        canonical_url=canonical,
+        window_hours=window_hours,
+        rank=rank,
+    )
     new_id = db.insert_posting(
         client,
         db.NewPosting(

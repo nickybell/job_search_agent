@@ -19,16 +19,35 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 
 ## What needs you (setup before the first run)
 
-- [ ] **First live searches.** Run `uv run jsa search --agent claude` and
+- [X] **First live searches.** Run `uv run jsa search --agent claude` and
   `uv run jsa search --agent perplexity` by hand. These are the first real
   validation of Step 1 and of the still-open **B-day liveness parity** question
-  (see below) — compare output quality via the `search_agent` column. Watch the
-  first few A-day (Opus) runs' spend before trusting the cron.
+  (see below). Watch the first few A-day (Opus) runs' spend before trusting the
+  cron.
+- [ ] **Run the bounded A/B trial (~7 cron days).** For the first week, run
+  `uv run jsa search --both` (or point the cron at it) so Claude and Perplexity
+  search the *same* window each day and both findings land in `search_findings`
+  — the day-of-year alternation confounds agent with day and can't A/B. Review
+  as normal, then `uv run jsa ab-report` for coverage / overlap / Apply
+  precision. Revert the cron to single-agent alternation afterward. Open
+  sub-decisions:
+  - [ ] Trial length — 7 days assumed; extend if daily volume is thin.
+  - [ ] Run the trial locally by hand vs. point the Fly cron at `--both` for the
+    week (doubles daily spend: ~A-day + B-day cost per run, ~$8.13 + ~$4.44 at
+    the 7-day-window rates measured 2026-08-06). **Currently the `jsa cron`
+    entrypoint runs `--both` on every Mon/Wed/Fri search day** — revert it to the
+    single-agent day-of-year alternation (`select_agent_for_date`) when the trial
+    ends.
+  - [ ] Success metric weighting — pure Apply-precision vs. unique-Apply yield
+    (which agent is the *sole* source of good roles) vs. cost-per-Apply.
 - [ ] **Fly.io deployment.** `fly auth signup`/`login`, `fly launch --no-deploy`
   (reuses the committed `fly.toml`), `fly secrets set` the four secrets, then
   smoke-test with a one-off `fly machine run . --rm` before creating the
   scheduled machine (`fly machine run . --schedule daily`) at your intended ET
-  morning hour.
+  morning hour. The image entrypoint is `jsa cron`, which self-gates to a
+  **Mon (72h) / Wed (48h) / Fri (48h)** cadence and no-ops on other days — Fly's
+  fuzzy `daily` schedule has no weekday selector, so the weekday+window logic
+  lives in the container. Verify the local Docker build first (see below).
 - [ ] **Publish (optional).** The repo is intended as a public portfolio piece
   once you're ready; push to a public GitHub remote on your personal account
   (not Keywell). `base_resume.docx` stays gitignored.

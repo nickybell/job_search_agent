@@ -34,5 +34,7 @@ COPY src/ ./src/
 COPY deep_research_prompt.md ./
 RUN uv sync --frozen --no-dev
 
-# One run per machine start; the scheduled machine stops when the search exits.
-ENTRYPOINT ["uv", "run", "--no-dev", "jsa", "search"]
+# One run per machine start; the scheduled machine stops when the command exits.
+# `jsa cron` self-gates to Mon/Wed/Fri with a weekday-sized window (see cli.py),
+# so the Fly machine can wake on a plain fuzzy `--schedule daily`.
+ENTRYPOINT ["uv", "run", "--no-dev", "jsa", "cron"]
