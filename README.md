@@ -10,7 +10,7 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
-| 1 | Daily job search, alternating Claude Deep Research (even days) and Perplexity Pro Search (odd days) | Fly.io cron (headless) |
+| 1 | Daily job search, alternating Claude Deep Research (even days) and Perplexity Agent API deep research (odd days) | Fly.io cron (headless) |
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
 
