@@ -49,6 +49,24 @@ CREATE TABLE IF NOT EXISTS postings (
 )
 """
 
+# Append-only A/B search telemetry. postings stores each req exactly once (the
+# idempotent insert no-ops re-encounters), which hides *which* agents also found
+# a req — the overlap an A/B comparison most wants. search_findings records one
+# row per (run_date, agent, canonical_url) for EVERY posting an agent returns,
+# whether or not the postings insert no-ops, so both agents get credit for a
+# shared find. This is search telemetry, not application state.
+_FINDINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS search_findings (
+    run_date      TEXT    NOT NULL,
+    agent         TEXT    NOT NULL CHECK (agent IN ('claude', 'perplexity')),
+    canonical_url TEXT    NOT NULL,
+    window_hours  INTEGER NOT NULL,
+    rank          INTEGER,
+    found_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (run_date, agent, canonical_url)
+)
+"""
+
 
 @dataclass
 class NewPosting:
@@ -92,8 +110,9 @@ def connect(config: Config) -> Connection:
 
 
 def init_db(client: Connection) -> None:
-    """Create the ``postings`` table if it does not already exist."""
+    """Create the ``postings`` and ``search_findings`` tables if absent."""
     client.execute(_SCHEMA)
+    client.execute(_FINDINGS_SCHEMA)
 
 
 def insert_posting(client: Connection, posting: NewPosting) -> int | None:
@@ -183,3 +202,69 @@ def record_decision(
         "UPDATE postings SET decision = ?, fit_feedback = ? WHERE id = ?",
         (decision, fit_feedback, posting_id),
     )
+
+
+def record_finding(
+    client: Connection,
+    *,
+    run_date: str,
+    agent: str,
+    canonical_url: str,
+    window_hours: int,
+    rank: int | None = None,
+) -> None:
+    """Log that ``agent`` surfaced ``canonical_url`` in the run for ``run_date``.
+
+    Written for every posting an agent returns — including ones the idempotent
+    ``postings`` insert no-ops — so the A/B overlap between agents is
+    measurable. ``ON CONFLICT DO NOTHING`` keeps a re-run of the same day+agent
+    from duplicating findings.
+    """
+    client.execute(
+        """
+        INSERT INTO search_findings (run_date, agent, canonical_url, window_hours, rank)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(run_date, agent, canonical_url) DO NOTHING
+        """,
+        (run_date, agent, canonical_url, window_hours, rank),
+    )
+
+
+def ab_report(client: Connection) -> dict:
+    """Compute the A/B comparison from ``search_findings`` joined to ``postings``.
+
+    Attribution lives in the append-only ``search_findings`` log, not the
+    ``postings`` row's ``search_agent`` (which records only the first inserter),
+    so a req both agents found credits both. Returns coverage (distinct reqs per
+    agent), overlap (both / claude-only / perplexity-only), and per-agent Apply
+    precision (the single ``postings.decision`` fanned out to every finder).
+    """
+    coverage = client.execute(
+        "SELECT agent, COUNT(DISTINCT canonical_url) "
+        "FROM search_findings GROUP BY agent ORDER BY agent"
+    ).fetchall()
+    overlap = client.execute(
+        """
+        SELECT
+          SUM(CASE WHEN c = 1 AND p = 1 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN c = 1 AND p = 0 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN p = 1 AND c = 0 THEN 1 ELSE 0 END)
+        FROM (
+          SELECT canonical_url,
+            MAX(CASE WHEN agent = 'claude' THEN 1 ELSE 0 END) AS c,
+            MAX(CASE WHEN agent = 'perplexity' THEN 1 ELSE 0 END) AS p
+          FROM search_findings GROUP BY canonical_url
+        )
+        """
+    ).fetchone()
+    precision = client.execute(
+        """
+        SELECT f.agent,
+          SUM(CASE WHEN pst.decision = 'Apply' THEN 1 ELSE 0 END) AS applies,
+          SUM(CASE WHEN pst.decision IN ('Apply', 'Skip') THEN 1 ELSE 0 END) AS decided
+        FROM search_findings f
+        JOIN postings pst ON pst.canonical_url = f.canonical_url
+        GROUP BY f.agent ORDER BY f.agent
+        """
+    ).fetchall()
+    return {"coverage": coverage, "overlap": overlap, "precision": precision}

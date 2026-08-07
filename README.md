@@ -94,13 +94,21 @@ fly secrets set \
 check logs + new Turso rows before letting the cron ride:
 
 ```bash
-fly machine run . --rm                                  # one-off; exits after one search
-fly machine run . --schedule daily --restart on-fail    # daily at ~the creation time (ET)
+fly machine run . --rm                                  # one-off; runs `jsa cron` once, then exits
+fly machine run . --schedule daily --restart on-fail    # wakes daily at ~the creation time (ET)
 ```
 
-Because the schedule fires ~24h after machine creation, create the scheduled
-machine at your intended morning hour. The A/B agent self-selects from the run
-date inside the container (even day-of-year = Claude, odd = Perplexity).
+The image's entrypoint is `jsa cron`, which **self-gates by ET weekday**:
+it searches on **Monday (72h window, covering the weekend)**, **Wednesday (48h)**,
+and **Friday (48h)**, and exits quietly on every other day. So a single fuzzy
+`--schedule daily` machine produces the Mon/Wed/Fri cadence — Fly's scheduler
+has no weekday selector or per-run args, so the weekday logic lives in the
+container. Create the scheduled machine **at your intended morning hour** (the
+daily interval fires ~24h after creation). The windows overlap by design, so a
+missed or doubled fuzzy fire is harmless — re-inserts no-op on `canonical_url`.
+
+During the current A/B trial, `jsa cron` runs **both** agents over the same
+window each search day (Claude Deep Research + Perplexity Agent API).
 
 > **Cost note:** watch the first few A-day (Claude Opus) runs' spend before
 > trusting the cron unattended.

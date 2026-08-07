@@ -22,7 +22,7 @@ Steps 1 and 2 (daily search and writing to database) are automated cron jobs. Ho
 
 ### Daily Search
 
-Each morning, run a search for new job postings in the last 48 hours (or from the command line with a parameterized time window and search agent). The search will alternate by day:
+The deployed cron runs on a **Monday / Wednesday / Friday** cadence, with per-day look-back windows sized to tile the week without gaps: **Monday looks back 72h** (covering the weekend), **Wednesday and Friday 48h** each. The windows deliberately overlap, so a missed run is recovered by the next one (and re-inserts no-op on `canonical_url`). It is also runnable from the command line with a parameterized time window and search agent. The choice of search *agent* alternates independently by day:
 
 **A Day:** Conduct the search using Claude Deep Research.
 
@@ -108,11 +108,15 @@ The Turso (libSQL) database holds the structured search output, the insert-idemp
 | `title_slug` | A filesystem-safe rendering of `title` (path separators and other reserved characters stripped/replaced, length-bounded), consumed by the Step 4 directory/filename builder. Derived at insert time from the search agent's `title`, then **re-derived from the ATS-canonical `title` when the full-JD fetch overwrites it** — so the packet naming carries the canonical title, consistent with the tracker row. |
 | `jd_markdown` | Full job description, fetched from the ATS JSON detail endpoint at insert time and converted HTML → Markdown. Source text for the Step 4 `job_posting.md`; `NULL` if the fetch failed. |
 | `location` | Structured location from the ATS record, kept as review/packet context. `NULL` if the fetch failed. |
-| `search_agent` | Which agent surfaced the posting (`claude` / `perplexity`) — lets us compare source quality over time. |
+| `search_agent` | Which agent *first* inserted the posting (`claude` / `perplexity`). Because both agents converge on the same `canonical_url`, this column alone can't show overlap — full per-agent attribution for the A/B comparison lives in `search_findings` (below). |
 | `first_seen_at` | Timestamp the posting entered the DB. |
 | `decision` | Enum of user's application decision (`Apply` / `Skip`). Nullable until feedback is given. |
 | `fit_feedback` | Optional free-text feedback from user. |
 | `added_to_tracker` | Boolean. `1` (True) indicates that the row has been added to the application tracker in Google Sheets.
+
+**A/B search evaluation (`search_findings`).** `search_agent` on a `postings` row records only the *first* agent to insert a req; since both agents converge on the same `canonical_url`, the idempotent insert hides which agents *also* found it — exactly the overlap an A/B comparison needs. So attribution lives in a second, append-only table, `search_findings (run_date, agent, canonical_url, window_hours, rank)`, written for *every* posting an agent returns (whether or not the `postings` insert no-ops). `postings` still stores each req once and carries the single `decision`/`fit_feedback`; `search_findings` fans that one decision out to every agent that surfaced the req, so a shared find credits both fairly. This is search telemetry, not application state, so it does not violate the Sheet-is-the-only-tracker rule.
+
+For a *controlled* comparison both agents must run over the **same `{{SEARCH_WINDOW}}`** — the steady-state day-of-year alternation (one agent per day, different windows) confounds the agent with the day. During a bounded A/B trial (the first ~7 cron days), `jsa search --both` runs Claude then Perplexity over one shared window and `now`, so `run_date` matches for both; `jsa ab-report` then joins `search_findings` → `postings` to report per-agent coverage, overlap (both / claude-only / perplexity-only), and Apply precision. Steady state reverts to single-agent alternation for cost.
 
 **Free-text feedback and ground truth.** The `fit_feedback` field is optional but central to the system's learning loop. While `decision` gives a filterable signal, the free-text captures *why* a posting does or doesn't fit — nuance the ordinal rating can't. This qualitative feedback is the primary raw material the daily prompt-updating cron job (the "ground truth" refinement of the Step 1 search prompt, fed by Step 3 feedback) draws on to refine future searches. Capturing it verbatim, even when sparse, materially improves search quality over time; it should never be required, but it should always be easy to add during the Step 3 review session.
 
@@ -209,7 +213,7 @@ The system is split between a headless cloud runtime and interactive local sessi
 
 **Hosting: Fly.io (cron) + Turso (database).**
 
-- **Fly.io** runs the automated Steps 1–2 (daily search, idempotent insert, full-JD fetch) and the prompt-refinement cron. The agent runs as a container (Claude Agent SDK plus the Perplexity client, the ATS fetch + HTML→Markdown step, and `.docx` handling), so a Fly Machine wakes on schedule for each run and stops after, keeping cost to pennies per month. Scheduling is via Fly Machines' native scheduled start. The A/B-day alternation is derived from the run date (day-of-year parity) inside the container so a single cron entry self-selects Claude vs. Perplexity. API keys and the Turso auth token are injected via `fly secrets set`.
+- **Fly.io** runs the automated Steps 1–2 (daily search, idempotent insert, full-JD fetch) and the prompt-refinement cron. The agent runs as a container (Claude Agent SDK plus the Perplexity client, the ATS fetch + HTML→Markdown step, and `.docx` handling), so a Fly Machine wakes on schedule for each run and stops after, keeping cost to pennies per month. **Scheduling logic lives in the container, not in Fly.** Fly Machines' native scheduled start offers only fuzzy `hourly`/`daily`/`weekly`/`monthly` intervals (no weekday selector, no per-run args), so the machine wakes on a plain `--schedule daily` and the `jsa cron` entrypoint self-gates: it maps the ET weekday to a look-back window (Mon 72h / Wed 48h / Fri 48h) and exits quietly on off days. Within a search day, the A/B agent choice is likewise derived from the run date (day-of-year parity) inside the container, so a single cron entry self-selects Claude vs. Perplexity. API keys and the Turso auth token are injected via `fly secrets set`.
 
 - **Turso** (hosted libSQL) holds the JD database. libSQL is SQLite-compatible, so the storage design above is unchanged, but both the cloud cron and the local interactive sessions connect to a single hosted copy — eliminating the divergence that a cron-writes-here / user-reviews-there split would otherwise create. This is what lets the daily search run even when the laptop is off while keeping Steps 3–5 as local Claude Code sessions.
 
