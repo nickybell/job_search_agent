@@ -1,13 +1,19 @@
-# Fly.io app config for the headless Steps 1-2 cron.
+# fly.toml app configuration file generated for job-search-agent-ancient-shoreline-9101 on 2026-08-09T21:02:07-04:00
 #
-# There is no HTTP service: a Fly Machine wakes on schedule, runs one `jsa
-# search`, and stops. Create the scheduled machine at the desired ET morning
-# hour (see README -> Deployment) so the ~24h schedule fires each morning.
-app = "job-search-agent"
-primary_region = "iad"
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'job-search-agent-ancient-shoreline-9101'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  TZ = "America/New_York"
+  TZ = 'America/New_York'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

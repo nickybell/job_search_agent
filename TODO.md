@@ -40,14 +40,46 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
     ends.
   - [ ] Success metric weighting — pure Apply-precision vs. unique-Apply yield
     (which agent is the *sole* source of good roles) vs. cost-per-Apply.
-- [ ] **Fly.io deployment.** `fly auth signup`/`login`, `fly launch --no-deploy`
-  (reuses the committed `fly.toml`), `fly secrets set` the four secrets, then
-  smoke-test with a one-off `fly machine run . --rm` before creating the
-  scheduled machine (`fly machine run . --schedule daily`) at your intended ET
-  morning hour. The image entrypoint is `jsa cron`, which self-gates to a
+- [X] **Fly.io deployment.** `fly auth signup`/`login`, `fly launch --no-deploy`
+  (reuses the committed `fly.toml`), `fly secrets set --stage` the four secrets
+  (`--stage` is required — this app has never gone through a `fly deploy`
+  release, so plain `fly secrets set` fails trying to auto-deploy against a
+  release that doesn't exist), then smoke-test with a one-off
+  `fly machine run . --rm --vm-memory 1024` before creating the scheduled
+  machine (`fly machine run . --schedule daily --restart on-fail --vm-memory
+  1024`) at your intended ET morning hour. **`--vm-memory 1024` is required** —
+  `fly machine run` talks to the Machines API directly and does not read
+  `fly.toml`'s `[[vm]]` block, so it silently defaults to `shared-cpu-1x`
+  (256MB), which isn't enough for the Claude Agent SDK's bundled CLI subprocess
+  (it hangs on `initialize` rather than failing loudly — this is what broke the
+  2026-08-10 go-live). The image entrypoint is `jsa cron`, which self-gates to a
   **Mon (72h) / Wed (48h) / Fri (48h)** cadence and no-ops on other days — Fly's
   fuzzy `daily` schedule has no weekday selector, so the weekday+window logic
-  lives in the container. Verify the local Docker build first (see below).
+  lives in the container.
+- [ ] **Rotate the leaked credentials before publishing.** The Turso auth
+  token, Anthropic API key, and Perplexity API key were pasted in plaintext
+  into a Claude Code transcript during setup (2026-08-09). Rotate all three,
+  then `fly secrets set` the fresh values:
+  - Turso: `turso db tokens invalidate job-search-agent` → `turso db tokens create job-search-agent`
+  - Anthropic: revoke the old key in the console, issue a new one
+  - Perplexity: revoke the old key in settings, issue a new one
+
+  Do this before the repo goes public (below). Use `fly secrets set --stage`
+  (see the Fly.io deployment item above) — plain `fly secrets set` fails on
+  this app.
+- [X] **2026-08-10 go-live incident.** The local cron
+  (`~/.jsa-cron/jsa-golive.sh`, one-time, self-removing) fired correctly at 6am
+  ET and created the scheduled machine, but the machine crashed twice
+  (`Control request timeout: initialize` from the bundled Claude Code CLI) and
+  hit Fly's max-restart count. Root cause: the machine ran at the
+  `fly machine run` default of 256MB RAM, not the 1GB in `fly.toml`'s `[[vm]]`
+  block, because `fly machine run` doesn't read that block (see above).
+  Separately, the script's crontab self-removal failed
+  (`crontab: tmp/tmp.9566: Operation not permitted`) because `cron` lacked
+  macOS Full Disk Access — granted now. Fixed by rotating secrets with
+  `--stage`, destroying the crashed machine, running an `--rm` catch-up job,
+  and re-anchoring the go-live cron to the next MWF morning with
+  `--vm-memory 1024` baked in.
 - [ ] **Publish (optional).** The repo is intended as a public portfolio piece
   once you're ready; push to a public GitHub remote on your personal account
   (not Keywell). `base_resume.docx` stays gitignored.
