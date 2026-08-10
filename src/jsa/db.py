@@ -29,8 +29,11 @@ Connection = sqlite3.Connection | turso_serverless.Connection
 
 # Indicative column set per prd.md "postings columns". decision is nullable
 # until Step 3; added_to_tracker/jd_markdown/location fill in later steps.
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS postings (
+#
+# Held as a bare column list (rather than a whole CREATE statement) because the
+# migration below rebuilds the table from the same text — the live schema and
+# the migration target can therefore never drift apart.
+_POSTINGS_COLUMNS = """
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     company            TEXT    NOT NULL,
     title              TEXT    NOT NULL,
@@ -41,13 +44,22 @@ CREATE TABLE IF NOT EXISTS postings (
     title_slug         TEXT    NOT NULL,
     jd_markdown        TEXT,
     location           TEXT,
-    search_agent       TEXT    NOT NULL CHECK (search_agent IN ('claude', 'perplexity')),
+    search_agent       TEXT    NOT NULL CHECK (search_agent IN ('claude', 'perplexity', 'manual')),
     first_seen_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     decision           TEXT    CHECK (decision IN ('Apply', 'Skip')),
     fit_feedback       TEXT,
     added_to_tracker   INTEGER NOT NULL DEFAULT 0
-)
 """
+
+# The same columns as an ordered name list, so the migration's INSERT … SELECT
+# copies by name rather than relying on positional alignment.
+_POSTINGS_COLUMN_NAMES = (
+    "id, company, title, url, date_posted, canonical_url, normalized_company, "
+    "title_slug, jd_markdown, location, search_agent, first_seen_at, decision, "
+    "fit_feedback, added_to_tracker"
+)
+
+_SCHEMA = f"CREATE TABLE IF NOT EXISTS postings ({_POSTINGS_COLUMNS})"
 
 # Append-only A/B search telemetry. postings stores each req exactly once (the
 # idempotent insert no-ops re-encounters), which hides *which* agents also found
@@ -110,9 +122,75 @@ def connect(config: Config) -> Connection:
 
 
 def init_db(client: Connection) -> None:
-    """Create the ``postings`` and ``search_findings`` tables if absent."""
+    """Create the ``postings`` and ``search_findings`` tables, then migrate.
+
+    Every command that touches the database calls this, so the migration below
+    is applied the first time an existing database is opened by a build that
+    needs it — there is no separate migrate step to forget.
+    """
+    # Migrate FIRST. The rebuild below briefly parks the data under another
+    # table name, and a CREATE TABLE IF NOT EXISTS run before the recovery step
+    # would fill that window with a shiny empty `postings`, orphaning the real
+    # rows. Migrating first means the create only ever fires on a truly new DB.
+    migrate_postings_schema(client)
     client.execute(_SCHEMA)
     client.execute(_FINDINGS_SCHEMA)
+
+
+def migrate_postings_schema(client: Connection) -> bool:
+    """Widen the legacy ``search_agent`` CHECK to admit ``'manual'``.
+
+    Databases created before the direct job-add path constrain ``search_agent``
+    to the two search agents, which rejects a hand-added row. SQLite cannot
+    ALTER a CHECK constraint, so this performs the standard table rebuild:
+    create the new table, copy, swap names, drop the old one.
+
+    On hosted Turso each statement is a separate autocommitted round-trip, so
+    the rebuild is *not* atomic: a failure between the two renames would leave
+    the data intact but parked under ``postings_migrated``. Rather than depend
+    on transaction semantics the HTTP transport may not offer, the sequence is
+    ordered so no step can lose data and ``_recover_interrupted_migration``
+    finishes any half-done swap on the next run. Returns True if the rebuild
+    ran, False if the schema was already current (the common case, costing one
+    ``sqlite_master`` read).
+    """
+    _recover_interrupted_migration(client)
+    row = client.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'postings'"
+    ).fetchone()
+    if row is None or "'manual'" in (row[0] or ""):
+        return False
+    client.execute("DROP TABLE IF EXISTS postings_migrated")
+    client.execute(f"CREATE TABLE postings_migrated ({_POSTINGS_COLUMNS})")
+    client.execute(
+        f"INSERT INTO postings_migrated ({_POSTINGS_COLUMN_NAMES}) "
+        f"SELECT {_POSTINGS_COLUMN_NAMES} FROM postings"
+    )
+    client.execute("ALTER TABLE postings RENAME TO postings_pre_manual")
+    client.execute("ALTER TABLE postings_migrated RENAME TO postings")
+    client.execute("DROP TABLE postings_pre_manual")
+    return True
+
+
+def _table_names(client: Connection) -> set[str]:
+    return {r[0] for r in client.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def _recover_interrupted_migration(client: Connection) -> None:
+    """Finish a rebuild that died between statements. Idempotent and cheap.
+
+    Two recoverable states, matching the two gaps in the sequence above:
+    ``postings`` renamed away but its replacement not yet renamed in (the only
+    window where the table is missing entirely), and the superseded copy left
+    undropped. Neither is reachable on a healthy run — this exists so a dropped
+    connection mid-migration is self-healing rather than a manual repair.
+    """
+    names = _table_names(client)
+    if "postings" not in names and "postings_migrated" in names:
+        client.execute("ALTER TABLE postings_migrated RENAME TO postings")
+        names = _table_names(client)
+    if "postings" in names and "postings_pre_manual" in names:
+        client.execute("DROP TABLE postings_pre_manual")
 
 
 def insert_posting(client: Connection, posting: NewPosting) -> int | None:
@@ -202,6 +280,47 @@ def record_decision(
         "UPDATE postings SET decision = ?, fit_feedback = ? WHERE id = ?",
         (decision, fit_feedback, posting_id),
     )
+
+
+def find_by_canonical_url(client: Connection, canonical_url: str) -> tuple | None:
+    """Return an existing row for ``canonical_url``, or None.
+
+    Only a UX affordance for the manual-add path (so it can report the existing
+    row instead of silently no-opping). It is *not* the idempotency mechanism —
+    that remains the UNIQUE constraint on the insert, which also closes the race
+    this read cannot.
+    """
+    cursor = client.execute(
+        "SELECT id, company, title, url, decision, added_to_tracker "
+        "FROM postings WHERE canonical_url = ?",
+        (canonical_url,),
+    )
+    return cursor.fetchone()
+
+
+def pending_tracker(client: Connection, posting_id: int | None = None) -> list[tuple]:
+    """Return ``Apply`` rows not yet written to the application tracker (Step 5).
+
+    ``added_to_tracker`` is the completion signal, so this query *is* the
+    idempotency guard for the tracker write: an already-appended row drops out
+    of the backlog and can never be double-appended. Passing ``posting_id``
+    narrows to one row while keeping both eligibility conditions.
+    """
+    sql = (
+        "SELECT id, normalized_company, title, url, date_posted "
+        "FROM postings WHERE decision = 'Apply' AND added_to_tracker = 0"
+    )
+    params: tuple = ()
+    if posting_id is not None:
+        sql += " AND id = ?"
+        params = (posting_id,)
+    cursor = client.execute(sql + " ORDER BY first_seen_at ASC, id ASC", params)
+    return list(cursor.fetchall())
+
+
+def mark_tracked(client: Connection, posting_id: int) -> None:
+    """Flag a row as written to the application tracker (Step 5's tail)."""
+    client.execute("UPDATE postings SET added_to_tracker = 1 WHERE id = ?", (posting_id,))
 
 
 def record_finding(
