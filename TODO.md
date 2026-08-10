@@ -9,13 +9,26 @@ Gaps to close in `prd.md` before it's ready for implementation planning.
 capture from all four supported ATS platforms (verified live), the deterministic
 review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 
+## Added 2026-08-10 (`feat/tracker-manual-add-review-ux`)
+
+- **Step 5, the tracker write** — `jsa track` appends `Apply` postings to the
+  Google Sheet via the local `gws` CLI and sets `added_to_tracker = 1`, only
+  ever after the Sheets API confirms the append. `--dry-run` previews, `--id`
+  narrows to one row. Step 4 will call it as its final action.
+- **The direct job-add path** — `jsa add <URL>` (see the resolved gap below).
+- **Review UX** — decisions are now revisable (`:a`/`:s` at the feedback prompt,
+  `b` to reopen the previous posting, plus an end-of-backlog amend offer), and
+  the prompts have real line editing via `prompt_toolkit`.
+- **A `pytest` suite** (61 tests) covering Steps 3 and 5, the manual-add path,
+  and the `search_agent` CHECK migration. Hermetic: throwaway `file:` SQLite, a
+  stubbed ATS fetch, and a stub `gws` binary via `JSA_GWS_BIN`.
+
 **Deferred, tracked for later:**
-- Steps 4–5 (per-job resume revisions; write-only Google Sheet tracker).
+- Step 4 (per-job resume revisions) — blocked on the TK tailoring instructions
+  and the `.docx`/`.pdf` toolchain decision (below).
 - The ground-truth prompt-refinement cron (mechanism still undesigned — see below).
-- The direct job-add path (below).
-- Test suite + CI hardening: pure logic (`canonicalize`, `naming`, `parse`,
-  `ats.resolve`) was written I/O-free specifically so a `pytest` suite drops in
-  without refactoring; deferred by choice to get a dev version running first.
+- Tests for the Step 1–2 search runners — the only substantial untested area
+  left; exercising them means real API spend, so they stay manual for now.
 
 ## What needs you (setup before the first run)
 
@@ -80,6 +93,19 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `--stage`, destroying the crashed machine, running an `--rm` catch-up job,
   and re-anchoring the go-live cron to the next MWF morning with
   `--vm-memory 1024` baked in.
+- [ ] **Re-authorize `gws` before the first real tracker write.** The local
+  OAuth grant is expired — every `gws` call currently fails with
+  `invalid_grant` (exit 2), confirmed 2026-08-10 against both `drive files
+  list` and the Sheets append, so it is the stored credential, not anything
+  Sheets-specific. Run `gws auth login`, then `uv run jsa track --dry-run`
+  followed by `uv run jsa track`. **This is the one part of Step 5 that could
+  not be verified end-to-end** — the `gws` invocation shape is confirmed against
+  `gws schema sheets.spreadsheets.values.append` and the success/failure
+  handling is covered by stub tests, but no row has been appended to the real
+  Sheet. Note the failure will recur weekly: the personal OAuth client is in
+  **External / Testing** publishing status, where Google expires refresh tokens
+  after 7 days. The durable fix is publishing the consent screen ("In
+  production") in the `job-search-agent-502402` GCP project.
 - [ ] **Publish (optional).** The repo is intended as a public portfolio piece
   once you're ready; push to a public GitHub remote on your personal account
   (not Keywell). `base_resume.docx` stays gitignored.
@@ -90,5 +116,14 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 
 ## Cross-cutting gaps not owned by any section
 
-- [ ] **Direct job-add path** — the Database section mentions Nicky providing jobs directly, but the ingestion route (does it run the canonical-URL idempotent insert and the full-JD fetch? where?) is unspecified. *(Deferred out of the Steps 1–3 implementation plan, 2026-07-21; natural shape is a CLI subcommand reusing Step 2's canonicalize → insert → JD-fetch on a user-supplied ATS URL.)*
+- [X] **Direct job-add path** — *Resolved 2026-08-10.* Specified in `prd.md`
+  ("Direct Job Add") and implemented as `jsa add <URL>` in `src/jsa/manual.py`.
+  It reuses Step 2's canonicalize → idempotent insert → JD-fetch rather than
+  forking it, so a hand-added row is indistinguishable downstream apart from
+  `search_agent = 'manual'`. Two deliberate departures: no `search_findings`
+  row (that table is A/B search telemetry, and a supplied posting would inflate
+  an agent's coverage), and an unsupported ATS is *not* a rejection (the
+  four-ATS rule is a liveness proxy for postings an agent found on its own —
+  the user has already vouched for this one, so it inserts with a `NULL
+  jd_markdown`).
 - [ ] **`.docx`/`.pdf` tooling** for Step 5 (pandoc? docx library + LibreOffice?) — affects local setup.

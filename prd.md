@@ -18,7 +18,7 @@ The agent will also update the prompt in Step 1 as a daily cron job to reflect t
 
 ### Automation
 
-Steps 1 and 2 (daily search and writing to database) are automated cron jobs. However, they should be runnable from the command line with a parameterized time window for the search and the search agent (Claude or Perplexity). Step 3 is "human-in-the-loop" with user input on each job via a CLI. Steps 4 and 5 are triggered in Claude Code using a slash command.
+Steps 1 and 2 (daily search and writing to database) are automated cron jobs. However, they should be runnable from the command line with a parameterized time window for the search and the search agent (Claude or Perplexity). Step 3 is "human-in-the-loop" with user input on each job via a CLI. Step 4 (resume revisions) is triggered in Claude Code using a slash command; Step 5 (the tracker write) is a deterministic CLI command (`jsa track`) that the Step 4 slash command calls as its final action — see Application Tracker.
 
 ### Daily Search
 
@@ -93,6 +93,19 @@ This single mechanism is what makes the pipeline safe to re-run — overlapping 
 
 - Derive `normalized_company` and `title_slug` into filesystem-safe form at write time (Step 2), so the Step 4 subagent composes its `~/Documents/Job Applications/…` paths directly from the row without re-sanitizing. This is also what lets the Step 4 `mkdir` guard treat *any* failure as "already exists": no path-hostile character can reach it to cause a spurious failure.
 
+### Direct Job Add
+
+Nicky can hand the agent a posting directly rather than waiting for the daily search to surface it (a role found on LinkedIn, sent by a friend, or spotted before the next cron day). This is a CLI subcommand, `jsa add <URL>`, and it deliberately **reuses Step 2 wholesale** — canonicalize → idempotent insert → full-JD fetch — rather than opening a second way into the table. A hand-added row is therefore indistinguishable downstream from a searched one: it lands in the same Step 3 review backlog and flows on to Steps 4–5 identically. The only difference is provenance, recorded as `search_agent = 'manual'`.
+
+Because it shares the canonical-URL idempotency key, adding a URL the daily search already found is a no-op — including when the two differ only by tracking parameters — so there is no risk of the manual path duplicating a req.
+
+Two deliberate departures from the automated pipeline:
+
+- **No `search_findings` row.** That table is A/B *search* telemetry. A posting Nicky supplied is not a search result, and crediting it to an agent would inflate that agent's coverage and distort Apply precision.
+- **Supported-ATS membership does not gate the insert.** The four-ATS rule is an inclusion criterion for what the *search* may return — it is a liveness proxy for postings an agent found on its own and cannot otherwise vouch for. Here Nicky has already vouched for the posting, so an unsupported URL (Workday, a custom careers site) still inserts; it simply keeps a `NULL jd_markdown`, exactly as a failed fetch does in the pipeline. The Step 4 packet for such a row will have no `job_posting.md` source text.
+
+`company` and `title` are `NOT NULL`, so they are resolved in precedence order: an explicit `--company` / `--title` flag, then the ATS detail record's canonical title and the board slug (the board slug *is* the company, just lowercased and hyphenated), then — in an interactive session — whatever Nicky edits into a pre-filled prompt. An explicit flag is never overwritten by the ATS transcription, which is the one place this path departs from Step 2's "the ATS title wins" rule: a deliberate override outranks a transcription. A non-interactive add (`--no-input`) that can derive neither field fails loudly rather than inventing a placeholder.
+
 ### Database
 
 The Turso (libSQL) database holds the structured search output, the insert-idempotency signal (`canonical_url`), and the user's fit feedback — everything the "ground truth" learning loop needs. It deliberately does *not* store application state: the Google Sheet is the application tracker (Step 5), and since the agent never reads back from that sheet, mirroring status or resume-branch data locally would be write-once, never-read duplication. A single core `postings` table covers everything the DB is responsible for.
@@ -108,7 +121,7 @@ The Turso (libSQL) database holds the structured search output, the insert-idemp
 | `title_slug` | A filesystem-safe rendering of `title` (path separators and other reserved characters stripped/replaced, length-bounded), consumed by the Step 4 directory/filename builder. Derived at insert time from the search agent's `title`, then **re-derived from the ATS-canonical `title` when the full-JD fetch overwrites it** — so the packet naming carries the canonical title, consistent with the tracker row. |
 | `jd_markdown` | Full job description, fetched from the ATS JSON detail endpoint at insert time and converted HTML → Markdown. Source text for the Step 4 `job_posting.md`; `NULL` if the fetch failed. |
 | `location` | Structured location from the ATS record, kept as review/packet context. `NULL` if the fetch failed. |
-| `search_agent` | Which agent *first* inserted the posting (`claude` / `perplexity`). Because both agents converge on the same `canonical_url`, this column alone can't show overlap — full per-agent attribution for the A/B comparison lives in `search_findings` (below). |
+| `search_agent` | Which agent *first* inserted the posting (`claude` / `perplexity`), or `manual` for a posting Nicky added directly (see Direct Job Add). Because both agents converge on the same `canonical_url`, this column alone can't show overlap — full per-agent attribution for the A/B comparison lives in `search_findings` (below). |
 | `first_seen_at` | Timestamp the posting entered the DB. |
 | `decision` | Enum of user's application decision (`Apply` / `Skip`). Nullable until feedback is given. |
 | `fit_feedback` | Optional free-text feedback from user. |
@@ -131,6 +144,15 @@ Each row in the `postings` table must be given a value for the `decision` field 
 3. Prompts in the terminal for the decision and optional `fit_feedback`, and writes both straight back to Turso.
 
 Because it is deterministic, it is invoked directly from within the interactive Claude Code session with the `!` prefix (e.g. `! python -m review`) or in a shell session. It is deliberately **not** a slash command, since a slash command would expand into a prompt the agent processes and reintroduce the per-posting token cost this design avoids.
+
+**Decisions are revisable within a session.** A judgment frequently changes *while the comment is being written* — articulating why a role is a Skip is often what reveals it is an Apply. A loop that commits the decision before the comment and then moves on makes that correction impossible, so there are two routes back:
+
+1. **`:a` / `:s` at the feedback prompt** flip the decision for the posting in hand. Anything typed after the command is kept as the comment, so changing one's mind mid-sentence does not cost the sentence. `:b` discards and returns to the decision prompt for the same posting.
+2. **`b` at the decision prompt** steps back to the *previous* posting and reopens it, showing its recorded decision (a bare Enter keeps it) with its comment pre-filled for editing. Pre-filling is applied to the comment but deliberately *not* to the decision prompt: on a single-letter choice, a pre-filled `a` turns the natural keystroke into `aa` — pre-filling helps only where the text is meant to be edited. The backlog list is captured once at session start, so a row that was just decided stays reachable even though it no longer matches the `NULL decision` query. At the end of the backlog the same offer is made once more, since the final posting is otherwise the one decision a session could never take back.
+
+Every decision is still written the moment it is made — revision is an `UPDATE` of the same row, not a deferred commit — so quitting (or Ctrl-C) at any point still loses nothing.
+
+**The comment field must be genuinely editable.** `fit_feedback` is the primary raw material of the ground-truth learning loop, so anything that discourages writing it is a design defect. Python's built-in `input()` reads a raw line: arrow keys, ⌥+delete and ^W arrive as escape bytes and land *in the comment as garbage*, which in practice means a typo can only be fixed by deleting back to it. The review prompts therefore go through a line-editing layer (`prompt_toolkit`) that restores the normal editing keys, supports the pre-filled editable buffer the amend flow above depends on, and offers Ctrl-X Ctrl-E to open `$EDITOR` for a long comment. This is local-terminal-only concern; it has no bearing on the headless cloud runtime, which never prompts.
 
 ### Resume Revisions
 
@@ -163,6 +185,14 @@ TK
 Step 5 appends one row to a Google Sheet for each job that reaches the application stage. The Sheet is the **write-only application tracker**: the agent only ever appends to it and **never reads back from it**, so application state (status, dates the user fills in) lives in the Sheet and is deliberately *not* mirrored into Turso (see Database). It is the user's manual workspace for tracking outcomes.
 
 **When the write happens.** The tracker write is the tail of Step 4/5, not Step 3. A row is appended **when the resume packet is generated** — i.e. as the final action of a Step 4 subagent, after the `.docx`/`.pdf` pair exists. Deciding to `Apply` in Step 3 does *not* write to the tracker; only jobs the user has actually committed to (a resume was drafted) appear there. On a successful append, the subagent sets `added_to_tracker = 1` on the row. Because `added_to_tracker` is the primary completion signal and the packet-directory `mkdir` is the idempotency guard (see Resume Revisions), a re-run never double-appends a job whose packet already exists.
+
+**The write itself is a deterministic command, not model work.** Rendering seven columns from a row and shelling out to `gws` requires no reasoning, so Step 5 is `jsa track` — a plain CLI command, on the same reasoning as the Step 3 review loop. The Step 4 subagent calls `jsa track --id <row>` as its final action; that is the seam between the two steps.
+
+**Interim trigger while Step 4 is unbuilt (decided 2026-08-10).** Step 4 is blocked on the TK tailoring instructions and the undecided `.docx`/`.pdf` toolchain, so until it exists `jsa track` is run by hand and its eligibility rule is `decision = 'Apply' AND added_to_tracker = 0` — i.e. **the Apply decision is the trigger, not packet-exists**. This is a deliberate, temporary relaxation of the rule above: it puts jobs in the tracker that have no resume packet yet. When Step 4 lands, the slash command becomes the caller and the packet-exists ordering is restored without any change to `jsa track` itself, because the eligibility query is the same one either way.
+
+**Idempotency is `added_to_tracker`, enforced at the query.** The backlog query *is* the guard: an already-appended row drops out of it and cannot be appended twice. Rows are appended one at a time rather than batched into a single call, so the flag is written per row and one rejected posting cannot strand the rest of the backlog in an ambiguous state. The flag is set **only after the Sheets API itself confirms an updated row** — any ambiguity (non-zero `gws` exit, unparseable output, a response reporting no appended row) is treated as failure and leaves the posting in the backlog for the next run. The alternative, optimistically flagging on a zero exit code, would silently drop a job out of the tracker forever, which is the one failure this step must not have.
+
+**Credential failure mode.** `gws` exits 2 when its stored OAuth grant is missing or invalid. The common cause is Google expiring the refresh token, which it does after 7 days for an OAuth client left in "Testing" publishing status — so this recurs weekly until the consent screen is published. `jsa track` reports that case as an instruction to re-run `gws auth login` rather than surfacing a raw `invalid_grant`.
 
 **Connection: the local `gws` CLI over local OAuth.** The write goes through the `gws` Google Workspace CLI, which holds a local OAuth token (with a refresh token) for the user's **personal** Google account, `nicky.bell@gmail.com`. This keeps the credential entirely local and off the Fly.io server — consistent with the cloud/local split (Steps 3–5 are local Claude Code sessions; Google Sheets OAuth stays local). Using the already-authenticated `gws` CLI avoids provisioning a second Google client library or auth flow.
 
