@@ -10,6 +10,12 @@ ENV TZ=America/New_York \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy
 
+# The Claude Agent SDK spawns the Claude Code CLI with --dangerously-skip-permissions,
+# which the CLI hard-refuses under root/sudo. Run as a non-root user so that guard is
+# satisfied the way it asks to be (rather than relying on the undocumented IS_SANDBOX
+# escape hatch). --create-home gives the CLI a writable HOME (~/.claude) and uv a cache.
+RUN useradd --create-home --uid 1001 appuser
+
 # Node 20 (for the Claude Code CLI) + tzdata for the ET-anchored A/B parity.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg tzdata \
@@ -33,6 +39,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 COPY deep_research_prompt.md ./
 RUN uv sync --frozen --no-dev
+
+# Hand the build artifacts (venv, source, prompt) to the non-root user, then drop to it.
+# uv's runtime sync check and the Claude CLI's config writes both need this ownership.
+RUN chown -R appuser:appuser /app
+USER appuser
 
 # One run per machine start; the scheduled machine stops when the command exits.
 # `jsa cron` self-gates to Mon/Wed/Fri with a weekday-sized window (see cli.py),

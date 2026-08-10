@@ -83,19 +83,24 @@ for local runs.
 ```bash
 fly auth signup                # or: fly auth login
 fly launch --no-deploy         # reuses the committed fly.toml
-fly secrets set \
-  TURSO_DATABASE_URL="libsql://..." \   # the libsql:// URL from `turso db show --url`
-  TURSO_AUTH_TOKEN="..." \
+fly secrets set --stage \      # --stage is required: this app has no `fly deploy` release,
+  TURSO_DATABASE_URL="libsql://..." \   # so plain `fly secrets set` fails trying to auto-deploy
+  TURSO_AUTH_TOKEN="..." \               # against a release that doesn't exist
   ANTHROPIC_API_KEY="sk-ant-..." \
   PERPLEXITY_API_KEY="pplx-..."
 ```
 
 **4. Smoke-test once, then schedule.** Run a one-off machine (no schedule) and
-check logs + new Turso rows before letting the cron ride:
+check logs + new Turso rows before letting the cron ride. `fly machine run`
+talks to the Machines API directly and does **not** read `fly.toml`'s `[[vm]]`
+block (that's only consumed by `fly deploy`) — pass `--vm-memory` explicitly or
+the machine defaults to `shared-cpu-1x` at 256MB, which is not enough headroom
+for the Claude Agent SDK's bundled CLI subprocess (it hangs on `initialize`
+rather than failing loudly):
 
 ```bash
-fly machine run . --rm                                  # one-off; runs `jsa cron` once, then exits
-fly machine run . --schedule daily --restart on-fail    # wakes daily at ~the creation time (ET)
+fly machine run . --rm --vm-memory 1024                                  # one-off; runs `jsa cron` once, then exits
+fly machine run . --schedule daily --restart on-fail --vm-memory 1024    # wakes daily at ~the creation time (ET)
 ```
 
 The image's entrypoint is `jsa cron`, which **self-gates by ET weekday**:
