@@ -324,6 +324,29 @@ def pending_tracker(client: Connection, posting_id: int | None = None) -> list[t
     return list(cursor.fetchall())
 
 
+def rows_for_refetch(
+    client: Connection,
+    posting_id: int | None = None,
+    *,
+    include_tracked: bool = False,
+) -> list[tuple]:
+    """Return rows whose ATS record should be re-read.
+
+    Defaults to rows not yet written to the tracker, since those are the ones
+    where a correction still propagates everywhere it matters. ``include_tracked``
+    widens to every row, which surfaces drift on postings already in the Sheet
+    even though this side cannot fix the Sheet copy.
+    """
+    sql = "SELECT id, url, title, location, added_to_tracker FROM postings"
+    params: tuple = ()
+    if posting_id is not None:
+        sql += " WHERE id = ?"
+        params = (posting_id,)
+    elif not include_tracked:
+        sql += " WHERE added_to_tracker = 0"
+    return list(client.execute(sql + " ORDER BY id ASC", params).fetchall())
+
+
 def mark_tracked(client: Connection, posting_id: int) -> None:
     """Flag a row as written to the application tracker (Step 5's tail)."""
     client.execute("UPDATE postings SET added_to_tracker = 1 WHERE id = ?", (posting_id,))
