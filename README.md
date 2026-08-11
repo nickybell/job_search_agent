@@ -6,15 +6,17 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 
 ## Status
 
-**In development.** This repo implements **Steps 1–3** of the PRD:
+**In development.** This repo implements **Steps 1–3 and 5** of the PRD:
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
 | 1 | Daily job search, alternating Claude Deep Research (even days) and Perplexity Agent API deep research (odd days) | Fly.io cron (headless) |
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
+| — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
+| 5 | Append `Apply` postings to the write-only Google Sheet application tracker | Local terminal |
 
-Steps 4–5 (per-job resume revisions, Google Sheet application tracker) and the “ground truth” prompt-refinement cron are specified in `prd.md` and will be built later.
+Step 4 (per-job resume revisions) and the “ground truth” prompt-refinement cron are specified in `prd.md` and will be built later. Until Step 4 exists, Step 5 is triggered by hand off the `Apply` decision rather than off a generated resume packet — see the interim note in `prd.md`.
 
 ## Architecture
 
@@ -51,7 +53,88 @@ Credentials (see `.env.example` for details): a Turso database URL + token, an A
 uv run jsa init-db                              # create the postings table
 uv run jsa search                              # run today's search (agent auto-selected by date)
 uv run jsa search --agent perplexity --window-hours 72   # explicit agent + window
+uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one posting by hand
 uv run jsa review                              # work through the fit-review backlog
+uv run jsa refetch --dry-run                   # report postings whose ATS record has drifted
+uv run jsa track --dry-run                     # preview the tracker rows
+uv run jsa track                               # append Apply postings to the Sheet
+```
+
+### Adding a posting by hand
+
+`jsa add <URL>` runs a user-supplied posting through the *same* pipeline as a
+searched one — canonicalize, idempotent insert, full-JD capture — tagged
+`search_agent = 'manual'`.
+
+**It is decided `Apply` on arrival.** Supplying the URL is the decision, so the
+posting skips the review backlog and goes straight into the tracker queue, ready
+for `jsa track`. Adding a URL already in the table promotes that row to `Apply`
+too (keeping any feedback you wrote about it), so handing over a posting you'd
+previously skipped is how you reverse that call.
+
+Company and title are pre-filled from the ATS record and the board slug for you
+to correct; `--company` / `--title` set them outright and `--no-input` skips the
+prompts.
+
+A URL on an unsupported ATS (Workday, a custom careers site) still works: the
+job description is captured from the page's schema.org JSON-LD, which most job
+pages embed so they can appear in Google Jobs. Capture order is supported ATS
+fetcher → JSON-LD → `NULL` — the platform's own record wins where it exists,
+since it is fuller and carries a structured location. This fallback is only for
+postings *you* hand over: it proves what a posting says, never that it's still
+open, so the search path doesn't use it.
+
+### Reviewing
+
+`jsa review` walks the backlog, opening each posting in Chrome. Decisions are
+revisable, because articulating *why* a role is a Skip is often what reveals
+it's an Apply:
+
+| Key | Where | What it does |
+| --- | --- | --- |
+| `a` / `s` | decision prompt | Apply / Skip |
+| `b` | decision prompt | step back to the previous posting and reopen it (Enter keeps its decision; its comment is pre-filled for editing) |
+| `q` | decision prompt | stop (everything already decided is saved) |
+| `:a` / `:s` | feedback prompt | change the decision; text typed after the command is kept as the comment |
+| `:b` | feedback prompt | discard and return to the decision prompt |
+
+At the end of the backlog you get one more chance to amend the last entry. The
+prompts have real line editing — arrow keys, ⌥+delete, ^W, ^A/^E — and
+Ctrl-X Ctrl-E opens `$EDITOR` for a long comment.
+
+### Keeping postings in sync
+
+Employers edit reqs in place. A Stepful posting in this database was retitled
+from "Fractional GTM Enablement Lead" to "Fractional Sales Enablement Lead"
+under an unchanged URL and posted-date. Since the job description is captured
+once at insert time (deliberately — it has to be captured while the posting is
+alive), a row can drift from its source.
+
+`jsa refetch` re-reads the ATS record and re-applies the insert's rule: the
+ATS-canonical title wins and `title_slug` is re-derived from it, with the
+description and location refreshed alongside. A failed fetch leaves the row
+untouched rather than trading a good capture for a blip, and a posting that has
+vanished from its board is reported, not deleted.
+
+```bash
+uv run jsa refetch --dry-run   # what has changed upstream, without writing
+uv run jsa refetch             # reconcile postings not yet in the tracker
+uv run jsa refetch --all       # include tracked rows (flagged — the Sheet can't be fixed from here)
+```
+
+### Elevating to the tracker
+
+`jsa track` appends every `Apply` posting that isn't in the tracker yet to the
+Google Sheet, then flags the row `added_to_tracker = 1`. The flag is set **only**
+after the Sheets API confirms the append, so a failure leaves the posting in the
+backlog rather than silently dropping it; re-running never double-appends.
+The write shells out to the local [`gws`](https://github.com/googleworkspace/cli)
+CLI, which holds the Google OAuth token — that credential stays off the Fly.io
+server by design. If `gws` reports an expired grant, re-run `gws auth login`.
+
+```bash
+uv run jsa track --dry-run     # print the exact rows without writing
+uv run jsa track --id 42       # elevate one posting
 ```
 
 ## Deployment (Fly.io + Turso)
@@ -161,6 +244,10 @@ src/jsa/
   ats/               full-JD capture: resolve URL -> fetch detail -> HTML->MD
   search/            Step 1 runners (Claude / Perplexity) + prompt + parser
   pipeline.py        Steps 1->2 orchestration
+  manual.py          direct job add: one user-supplied URL through Step 2
   review.py          Step 3 deterministic review loop
+  prompting.py       line-edited terminal input shared by the local commands
+  tracker.py         Step 5 write to the Google Sheet application tracker
   cli.py             the `jsa` command-line entry point
+tests/               hermetic pytest suite (throwaway SQLite, stubbed ATS + gws)
 ```
