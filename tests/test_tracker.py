@@ -143,7 +143,11 @@ def test_append_sends_the_prd_gws_invocation(config, client, ok_stub):
         "spreadsheetId": "sheet-under-test",
         "range": "Applications!A:G",
         "valueInputOption": "USER_ENTERED",
-        "insertDataOption": "INSERT_ROWS",
+        # OVERWRITE, not INSERT_ROWS: inserting a row lands it outside the
+        # Status dropdown's validation range and shifts that range down, so
+        # every append would lose the dropdown and drag the rules further off
+        # the data. Measured on the live sheet 2026-08-11.
+        "insertDataOption": "OVERWRITE",
     }
     assert len(json.loads(argv[7])["values"][0]) == 7
 

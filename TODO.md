@@ -19,7 +19,19 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 - **Review UX** — decisions are now revisable (`:a`/`:s` at the feedback prompt,
   `b` to reopen the previous posting, plus an end-of-backlog amend offer), and
   the prompts have real line editing via `prompt_toolkit`.
-- **A `pytest` suite** (61 tests) covering Steps 3 and 5, the manual-add path,
+- **`jsa refetch`** — reconciles stored postings against their ATS record.
+  Prompted by a real case: a Stepful req was retitled in place (GTM → Sales)
+  under an unchanged URL and `publishedAt`, confirmed against an Internet
+  Archive snapshot. Capture-once is still right (Step 4 runs days later, so the
+  JD must be captured while the posting is alive) but needed a way back.
+- **Tracker append switched to `insertDataOption = OVERWRITE`.** `INSERT_ROWS`
+  was silently destroying the sheet: each appended row landed outside the
+  `Status` validation and conditional-format ranges (losing the dropdown) and
+  shifted those ranges down one, dragging them permanently off the data — after
+  two appends the rules covered rows 4–1002 while the data sat in rows 2–3. The
+  live sheet has been repaired (ranges re-anchored to row 2, dropdown restored
+  on rows 2–3, inherited header styling cleared).
+- **A `pytest` suite** (81 tests) covering Steps 3 and 5, the manual-add path,
   and the `search_agent` CHECK migration. Hermetic: throwaway `file:` SQLite, a
   stubbed ATS fetch, and a stub `gws` binary via `JSA_GWS_BIN`.
 
@@ -93,19 +105,15 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `--stage`, destroying the crashed machine, running an `--rm` catch-up job,
   and re-anchoring the go-live cron to the next MWF morning with
   `--vm-memory 1024` baked in.
-- [ ] **Re-authorize `gws` before the first real tracker write.** The local
-  OAuth grant is expired — every `gws` call currently fails with
-  `invalid_grant` (exit 2), confirmed 2026-08-10 against both `drive files
-  list` and the Sheets append, so it is the stored credential, not anything
-  Sheets-specific. Run `gws auth login`, then `uv run jsa track --dry-run`
-  followed by `uv run jsa track`. **This is the one part of Step 5 that could
-  not be verified end-to-end** — the `gws` invocation shape is confirmed against
-  `gws schema sheets.spreadsheets.values.append` and the success/failure
-  handling is covered by stub tests, but no row has been appended to the real
-  Sheet. Note the failure will recur weekly: the personal OAuth client is in
-  **External / Testing** publishing status, where Google expires refresh tokens
-  after 7 days. The durable fix is publishing the consent screen ("In
-  production") in the `job-search-agent-502402` GCP project.
+- [X] **Re-authorize `gws`.** *Done 2026-08-11.* The grant had expired
+  (`invalid_grant`, exit 2, affecting every `gws` call, not just Sheets); after
+  `gws auth login` the live tracker append is verified end-to-end. Expect this
+  to recur: the personal OAuth client is in **External / Testing** publishing
+  status, where Google expires refresh tokens after 7 days.
+- [ ] **Publish the OAuth consent screen** in the `job-search-agent-502402` GCP
+  project ("In production"), so the `gws` refresh token stops expiring weekly
+  and `jsa track` doesn't need re-auth before most runs. Until then, a
+  `gws auth login` is the fix whenever `jsa track` reports an expired grant.
 - [ ] **Publish (optional).** The repo is intended as a public portfolio piece
   once you're ready; push to a public GitHub remote on your personal account
   (not Keywell). `base_resume.docx` stays gitignored.

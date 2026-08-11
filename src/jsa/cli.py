@@ -23,6 +23,7 @@ from . import db, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, select_agent_for_date, window_for_date
+from .refetch import describe, run_refetch
 from .review import run_review
 from .search.prompt import EASTERN
 from .tracker import TrackerError, run_tracker
@@ -187,6 +188,51 @@ def review_command() -> None:
     """Work through the backlog of postings awaiting a fit decision (Step 3)."""
     config = load_config()
     run_review(config)
+
+
+@main.command("refetch")
+@click.option("--id", "posting_id", type=int, default=None, help="Re-read only this posting id.")
+@click.option(
+    "--all",
+    "include_tracked",
+    is_flag=True,
+    default=False,
+    help="Include postings already written to the tracker (reports drift it cannot fix there).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report what changed upstream without writing to the database.",
+)
+def refetch_command(posting_id: int | None, include_tracked: bool, dry_run: bool) -> None:
+    """Re-read stored postings from their ATS and reconcile drift.
+
+    Employers edit reqs in place, so a title or description captured at insert
+    time can go stale under an unchanged URL. This re-applies the insert's rule:
+    the ATS-canonical title wins and ``title_slug`` is re-derived from it. A
+    failed fetch leaves the row untouched rather than blanking a good capture.
+
+    Defaults to postings not yet in the tracker — the ones where a correction
+    still propagates everywhere it matters.
+    """
+    _configure_logging()
+    config = load_config()
+    summary, results = run_refetch(
+        config,
+        posting_id=posting_id,
+        include_tracked=include_tracked,
+        dry_run=dry_run,
+    )
+    if summary.examined == 0:
+        click.echo("No postings to re-read.")
+        return
+    for result in results:
+        click.echo(describe(result))
+    if dry_run:
+        click.echo(f"(dry run — nothing written) {summary}")
+        return
+    click.echo(str(summary))
 
 
 @main.command("track")

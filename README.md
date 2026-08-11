@@ -55,6 +55,7 @@ uv run jsa search                              # run today's search (agent auto-
 uv run jsa search --agent perplexity --window-hours 72   # explicit agent + window
 uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one posting by hand
 uv run jsa review                              # work through the fit-review backlog
+uv run jsa refetch --dry-run                   # report postings whose ATS record has drifted
 uv run jsa track --dry-run                     # preview the tracker rows
 uv run jsa track                               # append Apply postings to the Sheet
 ```
@@ -93,6 +94,26 @@ it's an Apply:
 At the end of the backlog you get one more chance to amend the last entry. The
 prompts have real line editing — arrow keys, ⌥+delete, ^W, ^A/^E — and
 Ctrl-X Ctrl-E opens `$EDITOR` for a long comment.
+
+### Keeping postings in sync
+
+Employers edit reqs in place. A Stepful posting in this database was retitled
+from "Fractional GTM Enablement Lead" to "Fractional Sales Enablement Lead"
+under an unchanged URL and posted-date. Since the job description is captured
+once at insert time (deliberately — it has to be captured while the posting is
+alive), a row can drift from its source.
+
+`jsa refetch` re-reads the ATS record and re-applies the insert's rule: the
+ATS-canonical title wins and `title_slug` is re-derived from it, with the
+description and location refreshed alongside. A failed fetch leaves the row
+untouched rather than trading a good capture for a blip, and a posting that has
+vanished from its board is reported, not deleted.
+
+```bash
+uv run jsa refetch --dry-run   # what has changed upstream, without writing
+uv run jsa refetch             # reconcile postings not yet in the tracker
+uv run jsa refetch --all       # include tracked rows (flagged — the Sheet can't be fixed from here)
+```
 
 ### Elevating to the tracker
 

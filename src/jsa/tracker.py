@@ -14,6 +14,29 @@ rejected posting cannot strand the rest of the backlog in an ambiguous state.
 **Credential placement** follows the cloud/local split: the append shells out to
 the local ``gws`` CLI, which holds the OAuth refresh token for the user's
 personal Google account. That credential never reaches the Fly.io container.
+
+**Why ``OVERWRITE`` and not ``INSERT_ROWS``.** The PRD originally specified
+``insertDataOption = INSERT_ROWS``, reasoning that appending at the bottom
+avoids row-index bookkeeping and read-modify-write. It does -- but it also
+inserts a *new* row, and measurement on the live sheet (2026-08-11) showed that
+carries two costs the reasoning missed:
+
+1. **The Status dropdown is lost.** The inserted row lands above the data
+   validation and conditional-formatting ranges, so it gets neither the enum
+   dropdown nor the per-status colors. Worse, inserting above those ranges
+   shifts them down by one, so every append drags the covered region further
+   from the data and the sheet never self-corrects.
+2. **It inherits the header's formatting.** A row inserted directly beneath the
+   bold grey header comes out bold and grey, and each later append then inherits
+   from that row, propagating indefinitely.
+
+``OVERWRITE`` writes into the sheet's already-existing blank rows instead of
+inserting. Sheets still locates the table server-side and writes after its last
+row, so the PRD's actual requirement -- no bookkeeping, no read-modify-write --
+is met, while the written row keeps the validation, conditional formatting and
+default styling it already had. The tradeoff is that anything a user parks in
+the rows directly below the table would be overwritten; that region is the
+tracker's own growth area, so this is the right trade.
 """
 
 from __future__ import annotations
@@ -36,6 +59,10 @@ log = logging.getLogger(__name__)
 # discover it at runtime. Overridable for a scratch copy while testing.
 DEFAULT_SPREADSHEET_ID = "1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4"
 TRACKER_RANGE = "Applications!A:G"
+
+# Write into the sheet's existing empty rows instead of inserting new ones.
+# See the module docstring: INSERT_ROWS silently broke the Status dropdown.
+INSERT_DATA_OPTION = "OVERWRITE"
 
 # gws's documented exit code for "credentials missing or invalid".
 _GWS_AUTH_EXIT = 2
@@ -111,16 +138,19 @@ def spreadsheet_id() -> str:
 def append_row(row: TrackerRow, sheet_id: str) -> int:
     """Append one row to the tracker Sheet; return the rows the API confirmed.
 
-    ``INSERT_ROWS`` adds at the bottom without any row-index bookkeeping or
-    read-modify-write, and ``USER_ENTERED`` lets the ISO dates land as real
-    dates rather than text. Raises ``TrackerError`` unless the response reports
-    at least one updated row.
+    Sheets finds the table in ``TRACKER_RANGE`` and writes after its last row,
+    so there is no row-index bookkeeping or read-modify-write, and
+    ``USER_ENTERED`` lets the ISO dates land as real dates rather than text.
+    Raises ``TrackerError`` unless the response reports at least one updated row.
+
+    ``OVERWRITE`` rather than ``INSERT_ROWS`` — see the module docstring for why
+    that distinction is load-bearing rather than cosmetic.
     """
     params = {
         "spreadsheetId": sheet_id,
         "range": TRACKER_RANGE,
         "valueInputOption": "USER_ENTERED",
-        "insertDataOption": "INSERT_ROWS",
+        "insertDataOption": INSERT_DATA_OPTION,
     }
     body = {"values": [row.as_values()]}
     command = [

@@ -110,6 +110,15 @@ Two deliberate departures from the automated pipeline:
 
 `company` and `title` are `NOT NULL`, so they are resolved in precedence order: an explicit `--company` / `--title` flag, then the ATS detail record's canonical title and the board slug (the board slug *is* the company, just lowercased and hyphenated), then — in an interactive session — whatever Nicky edits into a pre-filled prompt. An explicit flag is never overwritten by the ATS transcription, which is the one place this path departs from Step 2's "the ATS title wins" rule: a deliberate override outranks a transcription. A non-interactive add (`--no-input`) that can derive neither field fails loudly rather than inventing a placeholder.
 
+### Posting Drift and Re-fetch
+
+Step 2 captures the job description once, at insert time, and never looks again. That is deliberate and still correct — Step 4 may run days later, after a posting has been pulled, so the capture must happen while the posting is alive. But it assumes a posting is immutable once captured, and it is not: **employers edit reqs in place.** On 2026-08-08 a Stepful posting read "Fractional GTM Enablement Lead"; by 2026-08-11 the same UUID, the same URL and the same `publishedAt` read "Fractional Sales Enablement Lead" (confirmed against an Internet Archive snapshot of the earlier page). Capture-once plus edit-in-place means a row can silently drift from its source with no path back — and the drift reaches the tracker row and the Step 4 packet naming, since both are built from `title` and `title_slug`.
+
+`jsa refetch` is that path back. It re-resolves the ATS record for stored postings and applies the same rule the insert does: the ATS-canonical `title` wins, `title_slug` is re-derived from it, and `jd_markdown`/`location` are refreshed alongside. Two constraints shape it:
+
+- **A failed fetch leaves the row completely untouched.** This is the same degrade-don't-destroy stance as the pipeline, applied in the direction that matters here: the pipeline degrades to a `NULL` description rather than dropping a row, and re-fetch must never trade a good stored capture for a network blip or a pulled posting. A posting that has disappeared from its board is *reported*, not deleted — the stored JD is then the only surviving record of it.
+- **Rows already written to the tracker are excluded by default, and flagged when included.** The Sheet is write-only from the agent's side, so a correction made here cannot propagate to a row already appended; that has to be fixed by hand. The default scope is therefore `added_to_tracker = 0` — the rows where a correction still reaches everywhere it matters — with `--all` widening to surface (but not silently paper over) drift on tracked rows.
+
 ### Database
 
 The Turso (libSQL) database holds the structured search output, the insert-idempotency signal (`canonical_url`), and the user's fit feedback — everything the "ground truth" learning loop needs. It deliberately does *not* store application state: the Google Sheet is the application tracker (Step 5), and since the agent never reads back from that sheet, mirroring status or resume-branch data locally would be write-once, never-read duplication. A single core `postings` table covers everything the DB is responsible for.
@@ -220,13 +229,20 @@ Step 5 appends one row to a Google Sheet for each job that reaches the applicati
 
 **`Status` column.** A strict data-validation dropdown with seven enum values, each backed by a conditional-formatting color rule so the sheet is scannable at a glance: `No response`, `Rejected`, `Interview(s)`, `Final Round`, `Offer`, `Decided to pass`, `Accepted`. A blank Status (freshly appended row) matches no rule and stays uncolored until the user picks a value — intended.
 
-**Append semantics.** The write is a single `sheets.spreadsheets.values.append` call against range `Applications!A:G` with `valueInputOption = USER_ENTERED` and `insertDataOption = INSERT_ROWS`, so a new row is added at the bottom without any row-index bookkeeping or read-modify-write. Concretely:
+**Append semantics.** The write is a single `sheets.spreadsheets.values.append` call against range `Applications!A:G` with `valueInputOption = USER_ENTERED` and `insertDataOption = OVERWRITE`, so a new row is added at the bottom without any row-index bookkeeping or read-modify-write. Concretely:
 
 ```
 gws sheets spreadsheets values append \
-  --params '{"spreadsheetId":"1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4","range":"Applications!A:G","valueInputOption":"USER_ENTERED","insertDataOption":"INSERT_ROWS"}' \
+  --params '{"spreadsheetId":"1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4","range":"Applications!A:G","valueInputOption":"USER_ENTERED","insertDataOption":"OVERWRITE"}' \
   --json   '{"values":[["<normalized_company>","<title>","<url>","<date_posted>","<date_added>","",""]]}'
 ```
+
+**`OVERWRITE`, not `INSERT_ROWS` (corrected 2026-08-11).** This section originally specified `INSERT_ROWS`, on the reasoning that appending at the bottom avoids row-index bookkeeping and read-modify-write. That reasoning is sound but the option was wrong: `INSERT_ROWS` *inserts* a row, and measurement on the live sheet after two real appends showed two consequences the original reasoning missed.
+
+1. **The `Status` dropdown is lost.** The inserted row lands outside the data-validation and conditional-formatting ranges, so it gets neither the enum dropdown nor the per-status colours. Worse, inserting above those ranges shifts them *down by one each time*, so every append drags the covered region further from the data. After two appends the rules covered rows 4–1002 while the data sat in rows 2–3. The sheet never self-corrects.
+2. **The row inherits the header's formatting.** A row inserted directly beneath the bold grey header comes out bold and grey, and each later append inherits from that row, propagating indefinitely.
+
+`OVERWRITE` writes into the sheet's already-existing blank rows rather than inserting. Sheets still locates the table server-side and writes after its last row, so the actual requirement above — no bookkeeping, no read-modify-write — still holds, while the written row keeps the validation, conditional formatting and default styling those rows already carry. Verified on a throwaway replica of this sheet: the appended row kept its dropdown, did not inherit the header's bold, and the conditional-format range did not move. The tradeoff is that anything parked in the rows directly below the table would be overwritten; that region is the tracker's own growth area, so this is the right trade.
 
 ### Search Prompt Updates from "Ground Truth"
 
