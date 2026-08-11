@@ -1,9 +1,15 @@
 """The ``jsa`` command-line entry point.
 
 Wraps the automated Steps 1–2 pipeline (``search``), the schema bootstrap
-(``init-db``), and the deterministic Step 3 review loop (``review``). The search
+(``init-db``), the direct job-add path (``add``), the deterministic Step 3
+review loop (``review``), and the Step 5 tracker write (``track``). The search
 command is what the Fly.io cron runs; it is also invocable by hand with a
 parameterized window and agent.
+
+The cloud/local split shows up here as which commands the Fly image ever runs:
+only ``cron`` (and ``search``/``init-db`` by hand). ``add``, ``review``, and
+``track`` are local — they want a terminal and, for ``track``, the local Google
+OAuth token held by the ``gws`` CLI.
 """
 
 from __future__ import annotations
@@ -13,11 +19,14 @@ from datetime import datetime
 
 import click
 
-from . import db
+from . import db, prompting
 from .config import load_config
+from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, select_agent_for_date, window_for_date
+from .refetch import describe, run_refetch
 from .review import run_review
 from .search.prompt import EASTERN
+from .tracker import TrackerError, run_tracker
 
 
 def _configure_logging() -> None:
@@ -105,11 +114,162 @@ def cron_command() -> None:
         click.echo(str(summary))
 
 
+@main.command("add")
+@click.argument("url")
+@click.option("--company", default=None, help="Company name. Default: derived from the ATS board.")
+@click.option("--title", default=None, help="Job title. Default: the ATS record's canonical title.")
+@click.option("--date-posted", default=None, help="Posting date, verbatim. Optional.")
+@click.option(
+    "--no-input",
+    is_flag=True,
+    default=False,
+    help="Never prompt: accept the derived company/title, or fail if they cannot be derived.",
+)
+def add_command(
+    url: str,
+    company: str | None,
+    title: str | None,
+    date_posted: str | None,
+    no_input: bool,
+) -> None:
+    """Add a job posting by URL, reusing Step 2's insert and full-JD capture.
+
+    Supplying the URL is itself the ``Apply`` decision, so the row skips the
+    Step 3 review backlog and goes straight into the Step 5 tracker queue.
+    Re-adding a known URL does not duplicate it — the same canonical-URL UNIQUE
+    constraint guards this path — but it does promote that row to ``Apply``.
+    """
+    _configure_logging()
+    config = load_config()
+    try:
+        result = add_posting(
+            url,
+            config,
+            company=company,
+            title=title,
+            date_posted=date_posted,
+            interactive=not no_input,
+        )
+    except ManualAddError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except prompting.Quit as exc:
+        # Ctrl-C/Ctrl-D at a prompt, or no terminal to prompt on at all. Nothing
+        # has been written yet -- the insert happens after both prompts.
+        raise click.ClickException(
+            "aborted before anything was written. Pass --company/--title (and "
+            "--no-input) to add a posting without prompting."
+        ) from exc
+
+    if result.status == "already_present":
+        click.echo(
+            f"Already in the database as id {result.posting_id}: {result.company} — {result.title}"
+        )
+        if result.decision_changed:
+            was = result.previous_decision or "undecided"
+            click.echo(f"  decision {was} → Apply; queued for `jsa track`.")
+        else:
+            click.echo("  already Apply; no change.")
+        return
+    click.echo(f"Added id {result.posting_id}: {result.company} — {result.title}")
+    click.echo("  decision: Apply (review skipped); queued for `jsa track`.")
+    if result.jd_captured:
+        click.echo(f"  full JD captured from {result.platform}.")
+    elif result.fetch_error:
+        click.echo(f"  JD capture failed ({result.fetch_error}); the row keeps a NULL jd_markdown.")
+    else:
+        click.echo(
+            "  no job description could be captured (no supported ATS and no "
+            "JSON-LD on the page); the Step 4 packet will have no job_posting.md."
+        )
+
+
 @main.command("review")
 def review_command() -> None:
     """Work through the backlog of postings awaiting a fit decision (Step 3)."""
     config = load_config()
     run_review(config)
+
+
+@main.command("refetch")
+@click.option("--id", "posting_id", type=int, default=None, help="Re-read only this posting id.")
+@click.option(
+    "--all",
+    "include_tracked",
+    is_flag=True,
+    default=False,
+    help="Include postings already written to the tracker (reports drift it cannot fix there).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report what changed upstream without writing to the database.",
+)
+def refetch_command(posting_id: int | None, include_tracked: bool, dry_run: bool) -> None:
+    """Re-read stored postings from their ATS and reconcile drift.
+
+    Employers edit reqs in place, so a title or description captured at insert
+    time can go stale under an unchanged URL. This re-applies the insert's rule:
+    the ATS-canonical title wins and ``title_slug`` is re-derived from it. A
+    failed fetch leaves the row untouched rather than blanking a good capture.
+
+    Defaults to postings not yet in the tracker — the ones where a correction
+    still propagates everywhere it matters.
+    """
+    _configure_logging()
+    config = load_config()
+    summary, results = run_refetch(
+        config,
+        posting_id=posting_id,
+        include_tracked=include_tracked,
+        dry_run=dry_run,
+    )
+    if summary.examined == 0:
+        click.echo("No postings to re-read.")
+        return
+    for result in results:
+        click.echo(describe(result))
+    if dry_run:
+        click.echo(f"(dry run — nothing written) {summary}")
+        return
+    click.echo(str(summary))
+
+
+@main.command("track")
+@click.option(
+    "--id",
+    "posting_id",
+    type=int,
+    default=None,
+    help="Elevate only this posting id (it must still be Apply and untracked).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print the rows that would be appended without calling gws.",
+)
+def track_command(posting_id: int | None, dry_run: bool) -> None:
+    """Append Apply-decided postings to the Google Sheet tracker (Step 5).
+
+    Eligibility is ``decision = 'Apply' AND added_to_tracker = 0``, and the flag
+    is set only after the Sheets API confirms the append — so re-running never
+    double-appends and a failed row stays in the backlog.
+    """
+    _configure_logging()
+    config = load_config()
+    try:
+        summary = run_tracker(config, posting_id=posting_id, dry_run=dry_run)
+    except TrackerError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if summary.eligible == 0:
+        click.echo("No Apply postings awaiting a tracker row.")
+        return
+    if dry_run:
+        return
+    click.echo(str(summary))
+    if summary.failed:
+        raise SystemExit(1)
 
 
 @main.command("ab-report")
