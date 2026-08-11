@@ -12,7 +12,7 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | --- | --- | --- |
 | 1 | Daily job search, alternating Claude Deep Research (even days) and Perplexity Agent API deep research (odd days) | Fly.io cron (headless) |
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
-| — | Direct job add: hand it a URL and it goes through the same Step 2 machinery | Local terminal |
+| — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
 | 5 | Append `Apply` postings to the write-only Google Sheet application tracker | Local terminal |
 
@@ -62,13 +62,19 @@ uv run jsa track                               # append Apply postings to the Sh
 ### Adding a posting by hand
 
 `jsa add <URL>` runs a user-supplied posting through the *same* pipeline as a
-searched one — canonicalize, idempotent insert, full-JD capture — so it lands in
-the same review backlog, tagged `search_agent = 'manual'`. Re-adding a URL the
-daily search already found is a no-op, including when the two differ only by
-tracking parameters. Company and title are pre-filled from the ATS record and
-the board slug for you to correct; `--company` / `--title` set them outright and
-`--no-input` skips the prompts. A URL on an unsupported ATS still inserts — it
-just keeps a `NULL` job description.
+searched one — canonicalize, idempotent insert, full-JD capture — tagged
+`search_agent = 'manual'`.
+
+**It is decided `Apply` on arrival.** Supplying the URL is the decision, so the
+posting skips the review backlog and goes straight into the tracker queue, ready
+for `jsa track`. Adding a URL already in the table promotes that row to `Apply`
+too (keeping any feedback you wrote about it), so handing over a posting you'd
+previously skipped is how you reverse that call.
+
+Company and title are pre-filled from the ATS record and the board slug for you
+to correct; `--company` / `--title` set them outright and `--no-input` skips the
+prompts. A URL on an unsupported ATS still inserts — it just keeps a `NULL` job
+description.
 
 ### Reviewing
 

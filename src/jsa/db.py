@@ -92,6 +92,11 @@ class NewPosting:
     normalized_company: str
     title_slug: str
     search_agent: str
+    # Set only by the direct job-add path, where supplying the URL *is* the
+    # Apply decision. The pipeline leaves it None so searched postings enter the
+    # Step 3 backlog. Writing it in the INSERT rather than a follow-up UPDATE
+    # means the row is never briefly visible as undecided.
+    decision: str | None = None
 
 
 def connect(config: Config) -> Connection:
@@ -205,8 +210,8 @@ def insert_posting(client: Connection, posting: NewPosting) -> int | None:
         """
         INSERT INTO postings (
             company, title, url, date_posted, canonical_url,
-            normalized_company, title_slug, search_agent
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            normalized_company, title_slug, search_agent, decision
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_url) DO NOTHING
         RETURNING id
         """,
@@ -219,6 +224,7 @@ def insert_posting(client: Connection, posting: NewPosting) -> int | None:
             posting.normalized_company,
             posting.title_slug,
             posting.search_agent,
+            posting.decision,
         ),
     )
     row = cursor.fetchone()
@@ -321,6 +327,16 @@ def pending_tracker(client: Connection, posting_id: int | None = None) -> list[t
 def mark_tracked(client: Connection, posting_id: int) -> None:
     """Flag a row as written to the application tracker (Step 5's tail)."""
     client.execute("UPDATE postings SET added_to_tracker = 1 WHERE id = ?", (posting_id,))
+
+
+def set_decision(client: Connection, posting_id: int, decision: str) -> None:
+    """Set only the ``decision`` column, leaving ``fit_feedback`` untouched.
+
+    Distinct from ``record_decision`` (which writes both) because the direct
+    job-add path may upgrade a row the user already reviewed: the note they
+    wrote about it is still worth keeping, and is still ground-truth material.
+    """
+    client.execute("UPDATE postings SET decision = ? WHERE id = ?", (decision, posting_id))
 
 
 def record_finding(

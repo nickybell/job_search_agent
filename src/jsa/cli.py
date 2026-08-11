@@ -133,9 +133,10 @@ def add_command(
 ) -> None:
     """Add a job posting by URL, reusing Step 2's insert and full-JD capture.
 
-    The row lands in the same review backlog as a searched posting, tagged
-    ``search_agent = 'manual'``. Re-adding a known URL is a no-op, since the
-    same canonical-URL UNIQUE constraint guards this path.
+    Supplying the URL is itself the ``Apply`` decision, so the row skips the
+    Step 3 review backlog and goes straight into the Step 5 tracker queue.
+    Re-adding a known URL does not duplicate it — the same canonical-URL UNIQUE
+    constraint guards this path — but it does promote that row to ``Apply``.
     """
     _configure_logging()
     config = load_config()
@@ -162,16 +163,22 @@ def add_command(
         click.echo(
             f"Already in the database as id {result.posting_id}: {result.company} — {result.title}"
         )
+        if result.decision_changed:
+            was = result.previous_decision or "undecided"
+            click.echo(f"  decision {was} → Apply; queued for `jsa track`.")
+        else:
+            click.echo("  already Apply; no change.")
         return
     click.echo(f"Added id {result.posting_id}: {result.company} — {result.title}")
+    click.echo("  decision: Apply (review skipped); queued for `jsa track`.")
     if result.jd_captured:
         click.echo(f"  full JD captured from {result.platform}.")
     elif result.fetch_error:
         click.echo(f"  JD capture failed ({result.fetch_error}); the row keeps a NULL jd_markdown.")
     else:
         click.echo(
-            "  no supported ATS matched this URL, so no JD was captured "
-            "(the row is still queued for review)."
+            "  no supported ATS matched this URL, so no JD was captured; "
+            "the Step 4 packet will have no job_posting.md source text."
         )
 
 

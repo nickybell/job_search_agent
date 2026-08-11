@@ -41,12 +41,12 @@ def stub_fetch(monkeypatch):
 def row_for(client, posting_id: int) -> dict:
     cursor = client.execute(
         "SELECT company, title, title_slug, normalized_company, jd_markdown, location, "
-        "search_agent, decision, date_posted FROM postings WHERE id = ?",
+        "search_agent, decision, date_posted, fit_feedback FROM postings WHERE id = ?",
         (posting_id,),
     )
     keys = (
         "company title title_slug normalized_company jd_markdown location "
-        "search_agent decision date_posted"
+        "search_agent decision date_posted fit_feedback"
     ).split()
     return dict(zip(keys, cursor.fetchone(), strict=True))
 
@@ -86,9 +86,24 @@ def test_add_captures_the_jd_and_tags_the_row_manual(config, client, stub_fetch)
     # Company falls back to the board slug; the title comes from the ATS record.
     assert (row["company"], row["title"]) == ("Acme", "Head of CE")
     assert row["title_slug"] == "Head of CE"
-    # And it lands in the review backlog exactly like a searched posting.
-    assert row["decision"] is None
-    assert [r[0] for r in db.pending_review(client)] == [result.posting_id]
+
+
+def test_add_decides_apply_and_skips_review(config, client, stub_fetch):
+    # Supplying the URL *is* the decision, so the row must not come back around
+    # as a review question -- it goes straight to the Step 5 tracker queue.
+    stub_fetch(ATSDetail(jd_markdown="jd", location=None, title="Head of CE"))
+    result = manual.add_posting(GREENHOUSE_URL, config, interactive=False)
+    assert row_for(client, result.posting_id)["decision"] == "Apply"
+    assert db.pending_review(client) == []
+    assert [r[0] for r in db.pending_tracker(client)] == [result.posting_id]
+
+
+def test_a_searched_posting_still_enters_the_review_backlog(client):
+    # Contrast case, guarding the shared NewPosting: only the manual path
+    # decides on arrival. A searched posting must still be reviewed.
+    posting_id = db.insert_posting(client, make_posting())
+    assert row_for(client, posting_id)["decision"] is None
+    assert [r[0] for r in db.pending_review(client)] == [posting_id]
 
 
 def test_add_writes_no_search_findings_row(config, client, stub_fetch):
@@ -121,12 +136,13 @@ def test_explicit_flags_win_over_the_ats_record(config, client, stub_fetch):
 # --- idempotency -----------------------------------------------------------
 
 
-def test_re_adding_a_known_url_is_a_no_op(config, client, stub_fetch):
+def test_re_adding_a_known_url_does_not_duplicate_it(config, client, stub_fetch):
     stub_fetch(ATSDetail(jd_markdown="jd", location=None, title="Head of CE"))
     first = manual.add_posting(GREENHOUSE_URL, config, interactive=False)
     second = manual.add_posting(GREENHOUSE_URL, config, interactive=False)
     assert second.status == "already_present"
     assert second.posting_id == first.posting_id
+    assert second.decision_changed is False  # already Apply
     assert client.execute("SELECT COUNT(*) FROM postings").fetchone()[0] == 1
 
 
@@ -140,13 +156,40 @@ def test_a_tracking_decorated_url_matches_the_existing_row(config, client, stub_
     assert (second.status, second.posting_id) == ("already_present", first.posting_id)
 
 
-def test_add_does_not_disturb_a_row_the_pipeline_already_decided(config, client, stub_fetch):
+@pytest.mark.parametrize("prior", [None, "Skip"])
+def test_adding_a_searched_row_promotes_it_to_apply(config, client, stub_fetch, prior):
+    # A posting the search already surfaced, then handed over by hand: the same
+    # intent as adding a new one, so an undecided or skipped row is promoted.
     posting_id = db.insert_posting(client, make_posting(canonical_url=GREENHOUSE_URL))
-    db.record_decision(client, posting_id, "Apply", "already reviewed")
+    if prior:
+        db.record_decision(client, posting_id, prior, "first pass said no")
     stub_fetch(ATSDetail(jd_markdown="jd", location=None, title="Head of CE"))
+
     result = manual.add_posting(GREENHOUSE_URL, config, interactive=False)
-    assert result.status == "already_present"
-    assert row_for(client, posting_id)["decision"] == "Apply"
+
+    assert (result.status, result.posting_id) == ("already_present", posting_id)
+    assert (result.previous_decision, result.decision_changed) == (prior, True)
+    row = row_for(client, posting_id)
+    assert row["decision"] == "Apply"
+    # The note written during review survives -- it is still ground truth for
+    # the search-prompt loop, even though the verdict changed.
+    assert row["fit_feedback"] == ("first pass said no" if prior else None)
+    # The promotion must not rewrite provenance: this req was found by search.
+    assert row["search_agent"] == "claude"
+    assert [r[0] for r in db.pending_tracker(client)] == [posting_id]
+
+
+def test_adding_an_already_tracked_row_does_not_requeue_it(config, client, stub_fetch):
+    # added_to_tracker is the completion signal; re-adding must not re-append.
+    posting_id = db.insert_posting(client, make_posting(canonical_url=GREENHOUSE_URL))
+    db.record_decision(client, posting_id, "Apply", None)
+    db.mark_tracked(client, posting_id)
+    stub_fetch(ATSDetail(jd_markdown="jd", location=None, title="Head of CE"))
+
+    result = manual.add_posting(GREENHOUSE_URL, config, interactive=False)
+
+    assert result.decision_changed is False
+    assert db.pending_tracker(client) == []
 
 
 # --- degraded paths --------------------------------------------------------
