@@ -193,6 +193,21 @@ def test_a_non_http_url_is_rejected(config, bad):
         manual.add_posting(bad, config, interactive=False)
 
 
+def test_a_prompt_abort_writes_nothing(config, client, stub_fetch, monkeypatch):
+    # Ctrl-D at the prompt, or no terminal to prompt on at all. The insert
+    # happens after both prompts, so aborting must leave the table untouched
+    # rather than half-adding a posting.
+    stub_fetch(ATSDetail(jd_markdown="jd", location=None, title="Head of CE"))
+
+    def refuse(message, *, default=""):
+        raise manual.prompting.Quit
+
+    monkeypatch.setattr(manual.prompting, "ask", refuse)
+    with pytest.raises(manual.prompting.Quit):
+        manual.add_posting(GREENHOUSE_URL, config, interactive=True)
+    assert client.execute("SELECT COUNT(*) FROM postings").fetchone()[0] == 0
+
+
 def test_interactive_prompts_are_prefilled_with_the_derived_values(
     config, client, stub_fetch, monkeypatch
 ):

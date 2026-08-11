@@ -19,7 +19,7 @@ from datetime import datetime
 
 import click
 
-from . import db
+from . import db, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, select_agent_for_date, window_for_date
@@ -150,6 +150,13 @@ def add_command(
         )
     except ManualAddError as exc:
         raise click.ClickException(str(exc)) from exc
+    except prompting.Quit as exc:
+        # Ctrl-C/Ctrl-D at a prompt, or no terminal to prompt on at all. Nothing
+        # has been written yet -- the insert happens after both prompts.
+        raise click.ClickException(
+            "aborted before anything was written. Pass --company/--title (and "
+            "--no-input) to add a posting without prompting."
+        ) from exc
 
     if result.status == "already_present":
         click.echo(
