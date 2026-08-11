@@ -74,8 +74,15 @@ previously skipped is how you reverse that call.
 
 Company and title are pre-filled from the ATS record and the board slug for you
 to correct; `--company` / `--title` set them outright and `--no-input` skips the
-prompts. A URL on an unsupported ATS still inserts — it just keeps a `NULL` job
-description.
+prompts.
+
+A URL on an unsupported ATS (Workday, a custom careers site) still works: the
+job description is captured from the page's schema.org JSON-LD, which most job
+pages embed so they can appear in Google Jobs. Capture order is supported ATS
+fetcher → JSON-LD → `NULL` — the platform's own record wins where it exists,
+since it is fuller and carries a structured location. This fallback is only for
+postings *you* hand over: it proves what a posting says, never that it's still
+open, so the search path doesn't use it.
 
 ### Reviewing
 

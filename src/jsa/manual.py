@@ -20,11 +20,14 @@ Two further deliberate departures from the automated pipeline:
 
 * **No ``search_findings`` row.** That table is A/B search telemetry; a manual
   add is not a search result and must not skew agent coverage or precision.
-* **The four-ATS rule does not gate the insert.** Supported-ATS membership is an
-  inclusion criterion for what the *search* may return — it is a liveness proxy
-  for postings the agent found on its own. Here the user has already vouched for
-  the posting, so an unsupported URL still inserts; it simply keeps a NULL
-  ``jd_markdown``, exactly as a failed fetch does in the pipeline.
+* **The four-ATS rule gates neither the insert nor the capture.** Supported-ATS
+  membership is an inclusion criterion for what the *search* may return — there
+  it doubles as the liveness proxy for postings the agent found on its own. Here
+  the user has already vouched, so the only remaining question is whether the
+  description can be retrieved. Capture therefore falls back to schema.org
+  JSON-LD (``ats/jsonld.py``) for URLs on any other platform, and only leaves a
+  NULL ``jd_markdown`` when that fails too. A JSON-LD capture is evidence of
+  content, never of liveness, and nothing here treats it otherwise.
 """
 
 from __future__ import annotations
@@ -36,7 +39,9 @@ from dataclasses import dataclass
 import httpx
 
 from . import db, prompting
-from .ats import fetch_detail, resolve_ats_url
+from .ats import fetch_detail, fetch_jsonld_detail, resolve_ats_url
+from .ats import to_markdown as jsonld_to_markdown
+from .ats.fetch import ATSDetail
 from .canonicalize import canonicalize_url
 from .config import Config
 from .naming import normalize_company, slugify_title
@@ -84,17 +89,39 @@ def company_from_board(board: str) -> str:
     return " ".join(word.capitalize() for word in words)
 
 
-def _fetch_best_effort(url: str) -> tuple[object | None, str | None, str | None]:
-    """Resolve and fetch the ATS detail record; never raise. -> (detail, platform, error)."""
+def _fetch_best_effort(url: str) -> tuple[ATSDetail | None, str | None, str | None]:
+    """Capture the description, never raising. -> (detail, source, error).
+
+    Preference order is deliberate. A supported ATS's own detail record wins:
+    it carries a structured location and the ATS-canonical title, and it is the
+    fuller text (measured on one Workday req, JSON-LD gave 4,471 chars against
+    5,358 from the platform's own record). JSON-LD is the fallback for
+    everything else. The order also matters in the other direction — Greenhouse
+    and Lever publish no JSON-LD at all, so for those the platform fetcher is
+    not merely preferred but the only thing that works.
+    """
     resolved = resolve_ats_url(url)
-    if resolved is None:
-        return None, None, None
-    try:
-        with httpx.Client(follow_redirects=True) as http:
-            return fetch_detail(resolved, http), resolved.platform, None
-    except Exception as exc:  # content capture, not a gate — mirrors the pipeline
-        log.warning("JD fetch failed for %s: %s", url, exc)
-        return None, resolved.platform, f"{type(exc).__name__}: {exc}"
+    with httpx.Client(follow_redirects=True) as http:
+        if resolved is not None:
+            try:
+                return fetch_detail(resolved, http), resolved.platform, None
+            except Exception as exc:  # capture, not a gate — mirrors the pipeline
+                log.warning("JD fetch failed for %s: %s", url, exc)
+                return None, resolved.platform, f"{type(exc).__name__}: {exc}"
+        try:
+            posting = fetch_jsonld_detail(url, http)
+        except Exception as exc:
+            log.warning("JSON-LD capture failed for %s: %s", url, exc)
+            return None, None, f"{type(exc).__name__}: {exc}"
+    return (
+        ATSDetail(
+            jd_markdown=jsonld_to_markdown(posting),
+            location=posting.location,
+            title=posting.title,
+        ),
+        "json-ld",
+        None,
+    )
 
 
 def add_posting(
