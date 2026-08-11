@@ -9,6 +9,16 @@ liveness gate.
 """
 
 from .fetch import ATSDetail, fetch_detail
+from .jsonld import JobPostingLD, extract_job_posting, fetch_jsonld_detail, to_markdown
 from .resolve import ResolvedATS, resolve_ats_url
 
-__all__ = ["ATSDetail", "fetch_detail", "ResolvedATS", "resolve_ats_url"]
+__all__ = [
+    "ATSDetail",
+    "fetch_detail",
+    "ResolvedATS",
+    "resolve_ats_url",
+    "JobPostingLD",
+    "extract_job_posting",
+    "fetch_jsonld_detail",
+    "to_markdown",
+]

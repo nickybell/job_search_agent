@@ -15,6 +15,7 @@ from conftest import make_posting
 
 from jsa import db, manual
 from jsa.ats.fetch import ATSDetail
+from jsa.ats.jsonld import JobPostingLD
 
 GREENHOUSE_URL = "https://job-boards.greenhouse.io/acme/jobs/4567"
 
@@ -195,20 +196,67 @@ def test_adding_an_already_tracked_row_does_not_requeue_it(config, client, stub_
 # --- degraded paths --------------------------------------------------------
 
 
-def test_an_unsupported_ats_still_inserts_without_a_jd(config, client, stub_fetch):
-    # The four-ATS rule gates what the *search* may return; here the user has
-    # already vouched for the posting.
-    stub_fetch(ATSDetail(jd_markdown="unused", location=None, title=None))
-    result = manual.add_posting(
-        "https://acme.wd1.myworkdayjobs.com/careers/job/Remote/Enablement-Lead_R-42",
-        config,
-        company="Acme",
-        title="Enablement Lead",
-        interactive=False,
+WORKDAY_URL = "https://acme.wd1.myworkdayjobs.com/careers/job/Remote/Enablement-Lead_R-42"
+
+
+def test_an_unsupported_ats_falls_back_to_json_ld(config, client, stub_fetch, monkeypatch):
+    # The four-ATS rule gates what the *search* may return, where it doubles as
+    # the liveness proxy. Here the user has vouched for the posting, so the only
+    # question left is whether the text is retrievable -- and on Workday it is.
+    stub_fetch(ATSDetail(jd_markdown="unused", location=None, title="unused"))
+    monkeypatch.setattr(
+        manual,
+        "fetch_jsonld_detail",
+        lambda url, http: JobPostingLD(
+            title="Enablement Lead",
+            description_html="<p>the JD</p>",
+            location="Santa Clara, CA",
+        ),
     )
+    result = manual.add_posting(WORKDAY_URL, config, company="Acme", interactive=False)
+
+    assert (result.platform, result.jd_captured) == ("json-ld", True)
+    row = row_for(client, result.posting_id)
+    assert row["jd_markdown"] == "the JD"
+    assert row["location"] == "Santa Clara, CA"
+    assert row["title"] == "Enablement Lead"
+
+
+def test_a_page_without_json_ld_still_inserts_with_a_null_jd(
+    config, client, stub_fetch, monkeypatch
+):
+    # Greenhouse and Lever publish no JSON-LD; so do plenty of custom sites.
+    # Capture failing must never cost the row.
+    stub_fetch(ATSDetail(jd_markdown="unused", location=None, title=None))
+
+    def no_jsonld(url, http):
+        raise LookupError("no schema.org JobPosting JSON-LD found on the page")
+
+    monkeypatch.setattr(manual, "fetch_jsonld_detail", no_jsonld)
+    result = manual.add_posting(
+        WORKDAY_URL, config, company="Acme", title="Enablement Lead", interactive=False
+    )
+
     assert result.status == "inserted"
-    assert (result.platform, result.jd_captured, result.fetch_error) == (None, False, None)
+    assert (result.platform, result.jd_captured) == (None, False)
+    assert "LookupError" in result.fetch_error
     assert row_for(client, result.posting_id)["jd_markdown"] is None
+
+
+def test_a_supported_ats_never_falls_back_to_json_ld(config, client, stub_fetch, monkeypatch):
+    # Preference order: the platform's own record is richer, and for Greenhouse
+    # and Lever it is the only source that exists. A failed platform fetch must
+    # NOT silently degrade to the lossier path.
+    def explode(url, http):
+        raise AssertionError("JSON-LD must not be attempted for a supported ATS")
+
+    monkeypatch.setattr(manual, "fetch_jsonld_detail", explode)
+    stub_fetch(raises=httpx.HTTPError("greenhouse is down"))
+
+    result = manual.add_posting(
+        GREENHOUSE_URL, config, company="Acme", title="Lead", interactive=False
+    )
+    assert (result.platform, result.jd_captured) == ("greenhouse", False)
 
 
 def test_a_failed_fetch_degrades_to_a_null_jd_rather_than_dropping_the_row(

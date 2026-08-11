@@ -178,8 +178,8 @@ def add_command(
         click.echo(f"  JD capture failed ({result.fetch_error}); the row keeps a NULL jd_markdown.")
     else:
         click.echo(
-            "  no supported ATS matched this URL, so no JD was captured; "
-            "the Step 4 packet will have no job_posting.md source text."
+            "  no job description could be captured (no supported ATS and no "
+            "JSON-LD on the page); the Step 4 packet will have no job_posting.md."
         )
 
 

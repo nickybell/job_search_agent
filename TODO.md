@@ -110,6 +110,13 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `gws auth login` the live tracker append is verified end-to-end. Expect this
   to recur: the personal OAuth client is in **External / Testing** publishing
   status, where Google expires refresh tokens after 7 days.
+- [ ] **Review the unit tests.** The `pytest` suite was written by the agent in
+  one pass, which makes it a mirror of what the agent already believed rather
+  than an independent check. Read through `tests/` and push back on anything
+  that asserts the wrong thing, over-fits the implementation, or misses a case
+  worth pinning. *(This also closes the "deferred by choice" note above: the
+  suite landed during the 2026-08-11 feature work, which reversed that
+  deferral — it should have been asked about first.)*
 - [ ] **Publish the OAuth consent screen** in the `job-search-agent-502402` GCP
   project ("In production"), so the `gws` refresh token stops expiring weekly
   and `jsa track` doesn't need re-auth before most runs. Until then, a
