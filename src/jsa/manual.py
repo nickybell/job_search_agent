@@ -7,7 +7,16 @@ way into the table, so a hand-added row is indistinguishable downstream from a
 searched one and lands in the same Step 3 review backlog. The only difference
 is provenance: ``search_agent = 'manual'``.
 
-Two deliberate departures from the automated pipeline:
+**A hand-added posting is decided `Apply` on arrival.** Supplying the URL *is*
+the decision — the user found this posting, read it, and chose to add it — so
+routing it through the Step 3 backlog would ask a question they just answered.
+It therefore skips review entirely and lands directly in the Step 5 tracker
+queue, reaching the Google Sheet by the same path as a searched posting the
+user marked `Apply`. Adding a URL already in the table upgrades that row's
+decision to `Apply` for the same reason, keeping any `fit_feedback` already
+written about it.
+
+Two further deliberate departures from the automated pipeline:
 
 * **No ``search_findings`` row.** That table is A/B search telemetry; a manual
   add is not a search result and must not skew agent coverage or precision.
@@ -41,6 +50,10 @@ class ManualAddError(RuntimeError):
     """The posting could not be added (bad URL, or missing company/title)."""
 
 
+# Supplying a URL by hand is itself the Apply decision (see module docstring).
+MANUAL_DECISION = "Apply"
+
+
 @dataclass
 class ManualAddResult:
     """What happened to one hand-added URL."""
@@ -53,6 +66,10 @@ class ManualAddResult:
     platform: str | None = None
     jd_captured: bool = False
     fetch_error: str | None = None
+    # What the row's decision was before this add, when it already existed:
+    # None for a fresh insert, otherwise the prior value (possibly NULL).
+    previous_decision: str | None = None
+    decision_changed: bool = False
 
 
 def company_from_board(board: str) -> str:
@@ -107,14 +124,7 @@ def add_posting(
     try:
         existing = db.find_by_canonical_url(client, canonical)
         if existing is not None:
-            existing_id, existing_company, existing_title, _, _, _ = existing
-            return ManualAddResult(
-                status="already_present",
-                canonical_url=canonical,
-                posting_id=int(existing_id),
-                company=existing_company,
-                title=existing_title,
-            )
+            return _upgrade_existing(client, existing, canonical)
 
         detail, platform, fetch_error = _fetch_best_effort(url)
         resolved_title = title or (getattr(detail, "title", None) or "")
@@ -141,16 +151,18 @@ def add_posting(
                 normalized_company=normalize_company(resolved_company),
                 title_slug=slugify_title(resolved_title),
                 search_agent="manual",
+                decision=MANUAL_DECISION,
             ),
         )
         if new_id is None:
             # Lost the race against a concurrent insert; the UNIQUE constraint
             # is the real guard and it held.
             row = db.find_by_canonical_url(client, canonical)
+            if row is not None:
+                return _upgrade_existing(client, row, canonical)
             return ManualAddResult(
                 status="already_present",
                 canonical_url=canonical,
-                posting_id=int(row[0]) if row else None,
                 company=resolved_company,
                 title=resolved_title,
             )
@@ -176,6 +188,31 @@ def add_posting(
             platform=platform,
             jd_captured=bool(jd),
             fetch_error=fetch_error,
+            decision_changed=True,
         )
     finally:
         client.close()
+
+
+def _upgrade_existing(client, existing: tuple, canonical: str) -> ManualAddResult:
+    """Report a row that already exists, promoting its decision to ``Apply``.
+
+    Re-adding a URL by hand carries the same intent as adding a new one, so a
+    row previously left undecided (or skipped in review) is promoted. Only the
+    decision moves: any ``fit_feedback`` written about it stays, since it is
+    still ground truth for the search-prompt loop.
+    """
+    existing_id, company, title, _url, decision, _tracked = existing
+    posting_id = int(existing_id)
+    changed = decision != MANUAL_DECISION
+    if changed:
+        db.set_decision(client, posting_id, MANUAL_DECISION)
+    return ManualAddResult(
+        status="already_present",
+        canonical_url=canonical,
+        posting_id=posting_id,
+        company=company,
+        title=title,
+        previous_decision=decision,
+        decision_changed=changed,
+    )

@@ -97,7 +97,11 @@ This single mechanism is what makes the pipeline safe to re-run — overlapping 
 
 Nicky can hand the agent a posting directly rather than waiting for the daily search to surface it (a role found on LinkedIn, sent by a friend, or spotted before the next cron day). This is a CLI subcommand, `jsa add <URL>`, and it deliberately **reuses Step 2 wholesale** — canonicalize → idempotent insert → full-JD fetch — rather than opening a second way into the table. A hand-added row is therefore indistinguishable downstream from a searched one: it lands in the same Step 3 review backlog and flows on to Steps 4–5 identically. The only difference is provenance, recorded as `search_agent = 'manual'`.
 
-Because it shares the canonical-URL idempotency key, adding a URL the daily search already found is a no-op — including when the two differ only by tracking parameters — so there is no risk of the manual path duplicating a req.
+Because it shares the canonical-URL idempotency key, adding a URL the daily search already found does not duplicate the req — including when the two differ only by tracking parameters.
+
+**A hand-added posting is decided `Apply` on arrival (decided 2026-08-11).** Supplying the URL *is* the decision: Nicky found the posting, read it, and chose to add it, so routing it through the Step 3 backlog would ask a question he has just answered. The row is therefore written with `decision = 'Apply'` in the insert itself (never briefly visible as undecided), skips review entirely, and lands directly in the Step 5 tracker queue — reaching the Google Sheet by the same path as a searched posting marked `Apply` in review. `fit_feedback` stays `NULL`; the free-text loop is fed by review, and nothing here forces a note.
+
+Adding a URL that is **already in the table** carries the same intent, so that row is promoted to `Apply` as well — including one previously marked `Skip`, since re-adding it by hand is an explicit reversal. Only the decision moves: any `fit_feedback` written during review is kept (it is still ground truth for the search-prompt loop even though the verdict changed), and `search_agent` is *not* rewritten, since the req really was found by that agent. A row already `Apply` is left untouched, so re-adding an already-tracked posting cannot requeue it for a second Sheet append.
 
 Two deliberate departures from the automated pipeline:
 
