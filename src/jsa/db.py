@@ -324,26 +324,52 @@ def pending_tracker(client: Connection, posting_id: int | None = None) -> list[t
     return list(cursor.fetchall())
 
 
+def pending_packets(client: Connection, posting_id: int | None = None) -> list[tuple]:
+    """Return ``Apply`` rows awaiting an application-packet directory (Step 4).
+
+    The default queue mirrors prd.md's Step 4 eligibility: ``decision = 'Apply'
+    AND added_to_tracker = 0``. Passing ``posting_id`` drops the tracker
+    condition -- but never the Apply one: while the interim track-on-Apply
+    trigger runs ``jsa track`` ahead of packet creation, most Apply rows are
+    tracked before any packet exists, and the explicit id is how a packet is
+    still built for one of those.
+    """
+    sql = (
+        "SELECT id, normalized_company, title_slug, company, title, jd_markdown "
+        "FROM postings WHERE decision = 'Apply'"
+    )
+    params: tuple = ()
+    if posting_id is not None:
+        sql += " AND id = ?"
+        params = (posting_id,)
+    else:
+        sql += " AND added_to_tracker = 0"
+    cursor = client.execute(sql + " ORDER BY first_seen_at ASC, id ASC", params)
+    return list(cursor.fetchall())
+
+
 def rows_for_refetch(
     client: Connection,
     posting_id: int | None = None,
     *,
-    include_tracked: bool = False,
+    include_all: bool = False,
 ) -> list[tuple]:
     """Return rows whose ATS record should be re-read.
 
-    Defaults to rows not yet written to the tracker, since those are the ones
-    where a correction still propagates everywhere it matters. ``include_tracked``
-    widens to every row, which surfaces drift on postings already in the Sheet
-    even though this side cannot fix the Sheet copy.
+    Defaults to ``Apply`` rows -- the ones where upstream drift can still change
+    what happens next (the packet naming and a pending or not-yet-applied
+    tracker row are built from them). The caller narrows further against the
+    tracker Sheet's Date Applied column, which the database deliberately does
+    not mirror. ``include_all`` widens to every stored row regardless of
+    decision or tracker state; ``posting_id`` targets one row unconditionally.
     """
     sql = "SELECT id, url, title, location, added_to_tracker FROM postings"
     params: tuple = ()
     if posting_id is not None:
         sql += " WHERE id = ?"
         params = (posting_id,)
-    elif not include_tracked:
-        sql += " WHERE added_to_tracker = 0"
+    elif not include_all:
+        sql += " WHERE decision = 'Apply'"
     return list(client.execute(sql + " ORDER BY id ASC", params).fetchall())
 
 

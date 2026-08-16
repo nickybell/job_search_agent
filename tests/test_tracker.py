@@ -51,7 +51,7 @@ def _isolate_env(tmp_path, monkeypatch):
 def ok_stub(tmp_path):
     return _write_stub(
         tmp_path,
-        'print(json.dumps({"updates": {"updatedRows": 1, "updatedCells": 7}}))',
+        'print(json.dumps({"updates": {"updatedRows": 1, "updatedCells": 8}}))',
     )
 
 
@@ -82,13 +82,15 @@ def tracked_flags(client) -> list[int]:
 # --- build_row (pure) ------------------------------------------------------
 
 
-def test_build_row_maps_the_seven_columns():
+def test_build_row_maps_the_eight_columns():
     row = tracker.build_row(
         (7, "Acme", "Enablement Lead", "https://x/1", "2026-08-08"), "2026-08-10"
     )
     assert row.posting_id == 7
-    # Date Applied and Status are the user's columns and must go out blank.
+    # ID leads (it is refetch's join key back to the DB row); Date Applied and
+    # Status are the user's columns and must go out blank.
     assert row.as_values() == [
+        "7",
         "Acme",
         "Enablement Lead",
         "https://x/1",
@@ -101,7 +103,7 @@ def test_build_row_maps_the_seven_columns():
 
 def test_build_row_renders_a_missing_date_posted_as_blank():
     row = tracker.build_row((7, "Acme", "Lead", "https://x/1", None), "2026-08-10")
-    assert row.as_values()[3] == ""
+    assert row.as_values()[4] == ""
 
 
 # --- eligibility and idempotency ------------------------------------------
@@ -141,7 +143,7 @@ def test_append_sends_the_prd_gws_invocation(config, client, ok_stub):
     params = json.loads(argv[5])
     assert params == {
         "spreadsheetId": "sheet-under-test",
-        "range": "Applications!A:G",
+        "range": "Applications!A:H",
         "valueInputOption": "USER_ENTERED",
         # OVERWRITE, not INSERT_ROWS: inserting a row lands it outside the
         # Status dropdown's validation range and shifts that range down, so
@@ -149,7 +151,7 @@ def test_append_sends_the_prd_gws_invocation(config, client, ok_stub):
         # the data. Measured on the live sheet 2026-08-11.
         "insertDataOption": "OVERWRITE",
     }
-    assert len(json.loads(argv[7])["values"][0]) == 7
+    assert len(json.loads(argv[7])["values"][0]) == 8
 
 
 def test_id_filter_still_enforces_eligibility(config, client, ok_stub):
@@ -166,7 +168,7 @@ def test_dry_run_writes_nothing(config, client, ok_stub, capsys):
     assert (summary.eligible, summary.appended) == (1, 0)
     assert tracked_flags(client) == [0]
     assert not ok_stub.exists()
-    assert "Applications!A:G" in capsys.readouterr().out
+    assert "Applications!A:H" in capsys.readouterr().out
 
 
 # --- failure handling ------------------------------------------------------
@@ -225,3 +227,40 @@ def test_missing_gws_binary_raises_before_touching_any_row(config, client, monke
     with pytest.raises(tracker.TrackerError, match="not found on PATH"):
         tracker.run_tracker(config)
     assert tracked_flags(client) == [0]
+
+
+# --- read_applied_dates (refetch's scope lookup) ---------------------------
+
+
+def test_read_applied_dates_maps_ids_and_treats_short_rows_as_unapplied(tmp_path):
+    # The Sheets API truncates trailing blank cells, so a not-yet-applied row
+    # usually arrives with no Date Applied cell at all; that must read as "".
+    response = {
+        "values": [
+            ["ID", "Company", "Title", "URL", "Date Posted", "Date Added", "Date Applied"],
+            ["3", "Acme", "Lead", "https://x/1", "2026-08-01", "2026-08-10"],
+            ["5", "Beta", "Mgr", "https://x/2", "2026-08-02", "2026-08-10", "2026-08-12"],
+        ]
+    }
+    _write_stub(tmp_path, f"print(json.dumps({response!r}))")
+    assert tracker.read_applied_dates("sheet-under-test") == {3: "", 5: "2026-08-12"}
+
+
+def test_read_applied_dates_skips_rows_without_a_numeric_id(tmp_path):
+    # A row typed into the Sheet by hand has no DB row to scope, and the
+    # header must never be mistaken for data.
+    response = {
+        "values": [
+            ["ID", "Company", "Title", "URL", "Date Posted", "Date Added", "Date Applied"],
+            ["", "Hand-added Inc", "Role", "https://x/9", "", "", "2026-08-01"],
+            ["4", "Acme", "Lead", "https://x/1", "", "", ""],
+        ]
+    }
+    _write_stub(tmp_path, f"print(json.dumps({response!r}))")
+    assert tracker.read_applied_dates("sheet-under-test") == {4: ""}
+
+
+def test_read_applied_dates_raises_on_a_failed_gws_call(tmp_path):
+    _write_stub(tmp_path, "sys.exit(2)")
+    with pytest.raises(tracker.TrackerError, match="gws auth login"):
+        tracker.read_applied_dates("sheet-under-test")

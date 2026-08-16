@@ -16,9 +16,18 @@ so the Step 4 packet naming stays consistent.
 Two things it will not do. A failed fetch leaves the row completely untouched
 rather than overwriting a good description with nothing -- the same
 degrade-don't-destroy stance the pipeline takes, applied in the direction that
-matters here. And a row already written to the tracker is reported but flagged,
-because the Sheet copy cannot be corrected from this side: the agent only ever
-appends to it.
+matters here. And a row already written to the tracker is flagged when it has
+drifted, because the Sheet copy cannot be corrected from this side: the agent
+only ever appends to it.
+
+Scope (decided 2026-08-16): only postings where drift could still change what
+Nicky does next -- ``decision = 'Apply'`` rows minus those already applied to.
+"Already applied" lives only in the Sheet's Date Applied column, so the scope
+check reads the tracker via ``tracker.read_applied_dates``, the one sanctioned
+read of the otherwise write-only Sheet (it mirrors nothing into the database
+and no write depends on it). If that lookup fails, the run fails loudly rather
+than guessing at scope. ``--all`` widens to every stored row and skips the
+lookup, as does an explicit ``--id``.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import httpx
 from . import db
 from .ats import fetch_detail, resolve_ats_url
 from .config import Config
+from .tracker import read_applied_dates, spreadsheet_id
 
 log = logging.getLogger(__name__)
 
@@ -63,12 +73,13 @@ class RefetchSummary:
     unresolved: int = 0
     failed: int = 0
     stale_in_tracker: int = 0
+    skipped_applied: int = 0
 
     def __str__(self) -> str:
         return (
             f"examined={self.examined} changed={self.changed} unchanged={self.unchanged} "
             f"unresolved={self.unresolved} failed={self.failed} "
-            f"stale_in_tracker={self.stale_in_tracker}"
+            f"stale_in_tracker={self.stale_in_tracker} skipped_applied={self.skipped_applied}"
         )
 
 
@@ -98,17 +109,28 @@ def run_refetch(
     config: Config,
     *,
     posting_id: int | None = None,
-    include_tracked: bool = False,
+    include_all: bool = False,
     dry_run: bool = False,
 ) -> tuple[RefetchSummary, list[RowResult]]:
-    """Re-read each selected posting's ATS record and reconcile the stored row."""
+    """Re-read each selected posting's ATS record and reconcile the stored row.
+
+    The default scope is Apply rows not yet applied to, per the tracker Sheet's
+    Date Applied column — raising ``tracker.TrackerError`` if that lookup fails,
+    since silently refetching everything (or nothing) would defeat the scoping.
+    An explicit ``posting_id`` or ``include_all`` bypasses the lookup entirely.
+    """
     summary = RefetchSummary()
     results: list[RowResult] = []
 
     client = db.connect(config)
     db.init_db(client)
     try:
-        rows = db.rows_for_refetch(client, posting_id, include_tracked=include_tracked)
+        rows = db.rows_for_refetch(client, posting_id, include_all=include_all)
+        if posting_id is None and not include_all and rows:
+            applied = read_applied_dates(spreadsheet_id())
+            kept = [r for r in rows if not applied.get(int(r[0]), "")]
+            summary.skipped_applied = len(rows) - len(kept)
+            rows = kept
         summary.examined = len(rows)
         if not rows:
             return summary, results
