@@ -42,6 +42,27 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 - Tests for the Step 1–2 search runners — the only substantial untested area
   left; exercising them means real API spend, so they stay manual for now.
 
+## Added 2026-08-16 (`feat/packet-cmd-refetch-scope-tracker-id`)
+
+- **`jsa packet`** — Step 4's steps 1–2 (the fail-if-exists `mkdir` guard and
+  `job_posting.md`) as a deterministic CLI command. Default queue is Apply +
+  untracked; `--id` waives the tracker condition (the interim track-on-Apply
+  trigger tracks rows before packets exist) but never the Apply one.
+- **`jsa refetch` rescoped** to postings where drift could still change an
+  action: `Apply` rows minus those with a `Date Applied` in the tracker Sheet.
+  That required the Sheet's first ever agent read — an explicit, user-decided
+  relaxation of the absolute "never reads back" rule, recorded in `prd.md`
+  (Application Tracker): read-only, scope-only, nothing mirrored, no write
+  depends on it. A failed lookup aborts; `--all`/`--id` skip the lookup.
+- **Tracker sheet gained an `ID` column** (now A:H, ID first) so Sheet rows
+  join back to `postings.id` without URL comparison. The live sheet was
+  restructured in place: column inserted, header formatted, existing rows
+  backfilled by URL match; data validation / conditional formatting verified
+  intact after the shift.
+- [ ] **Review the new/updated tests** (`test_packet.py`, refetch scope tests,
+  tracker A:H tests) — same standing rule as the suite below: agent-authored
+  tests are provisional until you've read them.
+
 ## What needs you (setup before the first run)
 
 - [X] **First live searches.** Run `uv run jsa search --agent claude` and

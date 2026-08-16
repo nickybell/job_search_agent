@@ -10,7 +10,7 @@ The purpose of this agent is to:
 2. Store those job postings (including the full job description, fetched from the posting's own ATS) in a database exactly once — the insert is idempotent, so re-surfaced postings no-op,
 3. Obtain feedback on job fit from the user,
 4. Generate resume revisions (from a canonical "base" from which each job's resume branches) for job postings to which the user wishes to apply, and
-5. Write the job posting to an application tracker as a Google Sheet (for user's tracking - there is never a read from the sheet by the agent).
+5. Write the job posting to an application tracker as a Google Sheet (for user's tracking - the agent appends and never manages state there; the one sanctioned read-only exception is `jsa refetch`'s scope lookup — see Posting Drift and Re-fetch).
 
 The agent will also update the prompt in Step 1 as a daily cron job to reflect the developing "ground truth" from Step 3.
 
@@ -121,7 +121,7 @@ Step 2 captures the job description once, at insert time, and never looks again.
 `jsa refetch` is that path back. It re-resolves the ATS record for stored postings and applies the same rule the insert does: the ATS-canonical `title` wins, `title_slug` is re-derived from it, and `jd_markdown`/`location` are refreshed alongside. Two constraints shape it:
 
 - **A failed fetch leaves the row completely untouched.** This is the same degrade-don't-destroy stance as the pipeline, applied in the direction that matters here: the pipeline degrades to a `NULL` description rather than dropping a row, and re-fetch must never trade a good stored capture for a network blip or a pulled posting. A posting that has disappeared from its board is *reported*, not deleted — the stored JD is then the only surviving record of it.
-- **Rows already written to the tracker are excluded by default, and flagged when included.** The Sheet is write-only from the agent's side, so a correction made here cannot propagate to a row already appended; that has to be fixed by hand. The default scope is therefore `added_to_tracker = 0` — the rows where a correction still reaches everywhere it matters — with `--all` widening to surface (but not silently paper over) drift on tracked rows.
+- **The scope is the postings where a change could still change Nicky's actions (decided 2026-08-16).** Eligible rows are `decision = 'Apply'` minus those already applied to: drift on an undecided or Skipped row changes nothing, and once the application is out the door a correction is moot. "Already applied" exists only in the Sheet's `Date Applied` column, so the scope check reads the tracker (`ID` → `Date Applied`) via the one sanctioned read-only lookup (see Application Tracker) — a row absent from the Sheet, or present with a blank `Date Applied`, is in scope. If that lookup fails, the command fails loudly rather than guessing at scope. A tracked-but-unapplied row that has drifted is refetched *and flagged*, since the Sheet copy still cannot be corrected from this side (that fix stays manual); `--all` widens to every stored row, and `--id` targets one, both without the Sheet lookup. *This supersedes the original default scope of `added_to_tracker = 0`*, which approximated "a correction still reaches everywhere" but kept refetching jobs already applied to while skipping tracked-but-unapplied ones — exactly the rows where the DB copy still feeds the packet.
 
 ### Database
 
@@ -191,6 +191,8 @@ Step 4 produces a per-job resume tailored from the user's canonical `base_resume
 
 The resulting directory is the self-contained application packet for one job: the source posting plus a `.docx`/`.pdf` pair ready to submit. Once the packet exists and the row is written to the application tracker (Step 5), `added_to_tracker` is set to `1`.
 
+**Interim command while Step 4 is unbuilt (decided 2026-08-16).** The subagent's steps 1–2 — the fail-if-exists `mkdir` and `job_posting.md` — are deterministic file I/O, so they are available today as `jsa packet`, a plain CLI command on the same no-LLM reasoning as Steps 3 and 5. Its default queue is the Step 4 eligibility above (`decision = 'Apply' AND added_to_tracker = 0`); because the interim track-on-Apply trigger (see Application Tracker) usually tracks a row before any packet exists, `--id` builds the packet for one named `Apply` row even when it is already tracked — the tracker condition is waived, the Apply one never is. A row with no captured JD still gets its directory (the gap is reported, not fatal — the same degrade-don't-destroy stance as the pipeline). When Step 4 lands, its subagents inherit these two steps already implemented and pick up at the tailoring.
+
 **Tailoring instructions (TK):**
 
 ```
@@ -199,7 +201,9 @@ TK
 
 ### Application Tracker (Google Sheets)
 
-Step 5 appends one row to a Google Sheet for each job that reaches the application stage. The Sheet is the **write-only application tracker**: the agent only ever appends to it and **never reads back from it**, so application state (status, dates the user fills in) lives in the Sheet and is deliberately *not* mirrored into Turso (see Database). It is the user's manual workspace for tracking outcomes.
+Step 5 appends one row to a Google Sheet for each job that reaches the application stage. The Sheet is the **write-only application tracker**: the agent only ever appends to it, so application state (status, dates the user fills in) lives in the Sheet and is deliberately *not* mirrored into Turso (see Database). It is the user's manual workspace for tracking outcomes.
+
+**One scoped read exception (decided 2026-08-16).** The rule was originally absolute ("never reads back from it"). `jsa refetch` now performs a **read-only** lookup of the `ID` and `Date Applied` columns to scope itself to postings not yet applied to (see Posting Drift and Re-fetch). The load-bearing parts of the rule are unchanged: application state still lives only in the Sheet, nothing from the Sheet is mirrored into Turso, and no write — to the Sheet or the database's tracked flags — is ever derived from what the read returns. It informs which ATS records to re-fetch, nothing more.
 
 **When the write happens.** The tracker write is the tail of Step 4/5, not Step 3. A row is appended **when the resume packet is generated** — i.e. as the final action of a Step 4 subagent, after the `.docx`/`.pdf` pair exists. Deciding to `Apply` in Step 3 does *not* write to the tracker; only jobs the user has actually committed to (a resume was drafted) appear there. On a successful append, the subagent sets `added_to_tracker = 1` on the row. Because `added_to_tracker` is the primary completion signal and the packet-directory `mkdir` is the idempotency guard (see Resume Revisions), a re-run never double-appends a job whose packet already exists.
 
@@ -219,10 +223,11 @@ Step 5 appends one row to a Google Sheet for each job that reaches the applicati
 - **Spreadsheet ID (config):** `1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4` — the agent needs this ID to target the append; it is fixed configuration, not something the agent discovers at runtime.
 - **Header row** is bolded and frozen (`frozenRowCount = 1`).
 
-**Columns (in order).** The first four are written verbatim from the `postings` row; the last three are set/filled as noted:
+**Columns (in order).** `ID` and the next four are written verbatim from the `postings` row; the last three are set/filled as noted:
 
 | Column | Source |
 | --- | --- |
+| `ID` | `id` — the database primary key, written at append time (added 2026-08-16). The join key that lets `jsa refetch`'s scope lookup match a Sheet row back to its `postings` row without comparing URLs. |
 | `Company` | `normalized_company` |
 | `Title` | `title` |
 | `URL` | `url` |
@@ -233,12 +238,12 @@ Step 5 appends one row to a Google Sheet for each job that reaches the applicati
 
 **`Status` column.** A strict data-validation dropdown with seven enum values, each backed by a conditional-formatting color rule so the sheet is scannable at a glance: `No response`, `Rejected`, `Interview(s)`, `Final Round`, `Offer`, `Decided to pass`, `Accepted`. A blank Status (freshly appended row) matches no rule and stays uncolored until the user picks a value — intended.
 
-**Append semantics.** The write is a single `sheets.spreadsheets.values.append` call against range `Applications!A:G` with `valueInputOption = USER_ENTERED` and `insertDataOption = OVERWRITE`, so a new row is added at the bottom without any row-index bookkeeping or read-modify-write. Concretely:
+**Append semantics.** The write is a single `sheets.spreadsheets.values.append` call against range `Applications!A:H` with `valueInputOption = USER_ENTERED` and `insertDataOption = OVERWRITE`, so a new row is added at the bottom without any row-index bookkeeping or read-modify-write. Concretely:
 
 ```
 gws sheets spreadsheets values append \
-  --params '{"spreadsheetId":"1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4","range":"Applications!A:G","valueInputOption":"USER_ENTERED","insertDataOption":"OVERWRITE"}' \
-  --json   '{"values":[["<normalized_company>","<title>","<url>","<date_posted>","<date_added>","",""]]}'
+  --params '{"spreadsheetId":"1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4","range":"Applications!A:H","valueInputOption":"USER_ENTERED","insertDataOption":"OVERWRITE"}' \
+  --json   '{"values":[["<id>","<normalized_company>","<title>","<url>","<date_posted>","<date_added>","",""]]}'
 ```
 
 **`OVERWRITE`, not `INSERT_ROWS` (corrected 2026-08-11).** This section originally specified `INSERT_ROWS`, on the reasoning that appending at the bottom avoids row-index bookkeeping and read-modify-write. That reasoning is sound but the option was wrong: `INSERT_ROWS` *inserts* a row, and measurement on the live sheet after two real appends showed two consequences the original reasoning missed.
