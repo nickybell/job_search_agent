@@ -19,7 +19,7 @@ from datetime import datetime
 
 import click
 
-from . import db, prompting
+from . import db, packet, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, select_agent_for_date, window_for_date
@@ -194,10 +194,10 @@ def review_command() -> None:
 @click.option("--id", "posting_id", type=int, default=None, help="Re-read only this posting id.")
 @click.option(
     "--all",
-    "include_tracked",
+    "include_all",
     is_flag=True,
     default=False,
-    help="Include postings already written to the tracker (reports drift it cannot fix there).",
+    help="Re-read every stored posting, regardless of decision or tracker state.",
 )
 @click.option(
     "--dry-run",
@@ -205,7 +205,7 @@ def review_command() -> None:
     default=False,
     help="Report what changed upstream without writing to the database.",
 )
-def refetch_command(posting_id: int | None, include_tracked: bool, dry_run: bool) -> None:
+def refetch_command(posting_id: int | None, include_all: bool, dry_run: bool) -> None:
     """Re-read stored postings from their ATS and reconcile drift.
 
     Employers edit reqs in place, so a title or description captured at insert
@@ -213,24 +213,83 @@ def refetch_command(posting_id: int | None, include_tracked: bool, dry_run: bool
     the ATS-canonical title wins and ``title_slug`` is re-derived from it. A
     failed fetch leaves the row untouched rather than blanking a good capture.
 
-    Defaults to postings not yet in the tracker — the ones where a correction
-    still propagates everywhere it matters.
+    Defaults to Apply postings either absent from the tracker Sheet or without
+    a Date Applied there — the ones where a change could still change your next
+    action. A corrected title is also propagated to the tracker row's Title
+    cell when the job sits there unapplied (the Sheet is a projection of the
+    database). The Sheet index read needs the local ``gws`` CLI; under ``--id``
+    and ``--all`` it is best-effort and only enables that Title refresh.
     """
     _configure_logging()
     config = load_config()
-    summary, results = run_refetch(
-        config,
-        posting_id=posting_id,
-        include_tracked=include_tracked,
-        dry_run=dry_run,
-    )
+    try:
+        summary, results = run_refetch(
+            config,
+            posting_id=posting_id,
+            include_all=include_all,
+            dry_run=dry_run,
+        )
+    except TrackerError as exc:
+        raise click.ClickException(
+            f"could not read the tracker Sheet to scope the refetch: {exc}\n"
+            "Use --all or --id to refetch without the Sheet lookup."
+        ) from exc
     if summary.examined == 0:
-        click.echo("No postings to re-read.")
+        if summary.skipped_applied:
+            click.echo(
+                f"No postings to re-read ({summary.skipped_applied} Apply row(s) "
+                "skipped — already applied per the tracker)."
+            )
+        else:
+            click.echo("No postings to re-read.")
         return
     for result in results:
         click.echo(describe(result))
     if dry_run:
         click.echo(f"(dry run — nothing written) {summary}")
+        return
+    click.echo(str(summary))
+
+
+@main.command("packet")
+@click.option(
+    "--id",
+    "posting_id",
+    type=int,
+    default=None,
+    help="Build one Apply posting's packet even if it is already in the tracker.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report the directories that would be created without touching the filesystem.",
+)
+def packet_command(posting_id: int | None, dry_run: bool) -> None:
+    """Create and seed application-packet directories (Step 4's first two steps).
+
+    For each ``Apply`` posting not yet in the tracker, creates
+    ``~/Documents/Job Applications/{normalized_company} - {title_slug}`` with a
+    fail-if-exists mkdir — an existing packet is skipped, never clobbered — and
+    writes the captured job description inside as ``job_posting.md``. The
+    resume tailoring itself (Step 4 proper) is still unbuilt; this covers the
+    deterministic file work it will sit on.
+    """
+    _configure_logging()
+    config = load_config()
+    summary, results = packet.run_packet(config, posting_id=posting_id, dry_run=dry_run)
+    if summary.eligible == 0:
+        if posting_id is not None:
+            raise click.ClickException(
+                f"id {posting_id} is not an Apply posting (or does not exist) — "
+                "packets are only built for jobs decided Apply."
+            )
+        click.echo("No Apply postings awaiting a packet directory.")
+        return
+    for result in results:
+        click.echo(packet.describe(result))
+    if dry_run:
+        click.echo(f"(dry run — nothing created) {summary}")
         return
     click.echo(str(summary))
 

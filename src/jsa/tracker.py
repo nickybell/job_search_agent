@@ -1,8 +1,17 @@
-"""Step 5: elevate ``Apply`` postings into the write-only Google Sheet tracker.
+"""Step 5: elevate ``Apply`` postings into the Google Sheet tracker.
 
-The Sheet is append-only from the agent's side — it never reads back — so the
-write is a single ``values.append`` per posting and application state (Date
-Applied, Status) stays in the Sheet, deliberately unmirrored into Turso.
+The relationship (reframed 2026-08-16): **the database is the source of truth
+for posting data; the Sheet is its human-readable projection plus Nicky's
+workspace.** Concretely, the Sheet's columns split into two classes. The
+agent-written columns (ID, Company, Title, URL, Date Posted, Date Added) are a
+view of the ``postings`` row — the agent appends them here and ``jsa refetch``
+refreshes the Title cell when the underlying row changes (``update_title``).
+The user columns (Date Applied, Status) are written only by Nicky; they are
+the one application state the system keeps, deliberately unmirrored into
+Turso, and the agent touches them in exactly one way: ``read_tracker_index``
+reads Date Applied so refetch can scope itself to postings not yet applied to.
+Authority never flows Sheet → database for posting data, and no agent write
+ever lands in a user column.
 
 **Idempotency** is the ``added_to_tracker`` column, exactly as the PRD
 specifies: the backlog query selects ``decision = 'Apply' AND added_to_tracker
@@ -58,7 +67,16 @@ log = logging.getLogger(__name__)
 # Fixed configuration per prd.md — the agent targets this Sheet, it does not
 # discover it at runtime. Overridable for a scratch copy while testing.
 DEFAULT_SPREADSHEET_ID = "1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4"
-TRACKER_RANGE = "Applications!A:G"
+# Eight columns, ID first (added 2026-08-16): the postings.id in column A is
+# the join key that lets refetch's scope lookup match Sheet rows back to DB
+# rows without comparing URLs.
+TRACKER_RANGE = "Applications!A:H"
+
+# 0-indexed positions in a TRACKER_RANGE row, for the index read below, and
+# the A1-notation column of the one cell refetch may refresh.
+_ID_COL = 0
+_DATE_APPLIED_COL = 6
+_TITLE_COL = "C"
 
 # Write into the sheet's existing empty rows instead of inserting new ones.
 # See the module docstring: INSERT_ROWS silently broke the Status dropdown.
@@ -81,7 +99,7 @@ class TrackerError(RuntimeError):
 
 @dataclass(frozen=True)
 class TrackerRow:
-    """One posting rendered into the Sheet's seven columns (A–G)."""
+    """One posting rendered into the Sheet's eight columns (A–H)."""
 
     posting_id: int
     company: str
@@ -97,6 +115,7 @@ class TrackerRow:
         user's columns, filled in by hand as an application progresses.
         """
         return [
+            str(self.posting_id),  # ID — the postings.id, refetch's join key
             self.company,
             self.title,
             self.url,
@@ -135,6 +154,40 @@ def spreadsheet_id() -> str:
     return os.environ.get("JSA_TRACKER_SPREADSHEET_ID") or DEFAULT_SPREADSHEET_ID
 
 
+def _run_gws(args: list[str], *, timeout: int = 60) -> dict:
+    """Shell out to gws and return its parsed JSON, raising on any ambiguity.
+
+    Shared by the append and the read-only scope lookup so both report the same
+    failure modes: a missing binary, a timeout, gws's documented exit 2 for a
+    lapsed OAuth grant (a Testing-status client expires refresh tokens every 7
+    days until the consent screen is published — say so rather than surfacing a
+    raw invalid_grant), and unparseable output.
+    """
+    command = [_gws_binary(), *args]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise TrackerError(
+            f"the {_gws_binary()!r} CLI was not found on PATH — talking to the tracker Sheet "
+            "needs it (it holds the local Google OAuth token)."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise TrackerError(f"the gws call timed out after {timeout}s.") from exc
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        if completed.returncode == _GWS_AUTH_EXIT:
+            raise TrackerError(
+                "the local Google OAuth grant is invalid or expired — re-authorize with "
+                f"`gws auth login`, then re-run (nothing was written).\n      {detail}"
+            )
+        raise TrackerError(f"gws exited {completed.returncode}: {detail}")
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise TrackerError(f"gws returned non-JSON output: {completed.stdout[:200]!r}") from exc
+
+
 def append_row(row: TrackerRow, sheet_id: str) -> int:
     """Append one row to the tracker Sheet; return the rows the API confirmed.
 
@@ -153,49 +206,88 @@ def append_row(row: TrackerRow, sheet_id: str) -> int:
         "insertDataOption": INSERT_DATA_OPTION,
     }
     body = {"values": [row.as_values()]}
-    command = [
-        _gws_binary(),
-        "sheets",
-        "spreadsheets",
-        "values",
-        "append",
-        "--params",
-        json.dumps(params),
-        "--json",
-        json.dumps(body),
-    ]
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=60)
-    except FileNotFoundError as exc:
-        raise TrackerError(
-            f"the {_gws_binary()!r} CLI was not found on PATH — the tracker write needs it "
-            "(it holds the local Google OAuth token)."
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise TrackerError("the gws Sheets append timed out after 60s.") from exc
-
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
-        if completed.returncode == _GWS_AUTH_EXIT:
-            # gws documents exit 2 as "credentials missing or invalid". The
-            # usual cause is a refresh token that Google expired: an OAuth
-            # client left in "Testing" publishing status has its grants expire
-            # after 7 days, so this recurs weekly until the consent screen is
-            # published. Say so, rather than surfacing a raw invalid_grant.
-            raise TrackerError(
-                "the local Google OAuth grant is invalid or expired — re-authorize with "
-                "`gws auth login`, then re-run `jsa track` (nothing was appended, and the "
-                f"postings are still queued).\n      {detail}"
-            )
-        raise TrackerError(f"gws exited {completed.returncode}: {detail}")
-    try:
-        response = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise TrackerError(f"gws returned non-JSON output: {completed.stdout[:200]!r}") from exc
+    response = _run_gws(
+        [
+            "sheets",
+            "spreadsheets",
+            "values",
+            "append",
+            "--params",
+            json.dumps(params),
+            "--json",
+            json.dumps(body),
+        ]
+    )
     updated = (response.get("updates") or {}).get("updatedRows")
     if not updated:
         raise TrackerError(f"the Sheets API reported no appended row: {response!r}")
     return int(updated)
+
+
+@dataclass(frozen=True)
+class TrackedRow:
+    """One Sheet data row, as ``jsa refetch``'s scope-and-propagation index."""
+
+    row_number: int  # 1-based Sheet row — the values.update target
+    date_applied: str  # "" = in the tracker but not yet applied to
+
+
+def read_tracker_index(sheet_id: str) -> dict[int, TrackedRow]:
+    """Read the Sheet's ID → (row number, Date Applied) index for refetch.
+
+    Two uses, both refetch's: Date Applied scopes the run to postings not yet
+    applied to (where a correction still changes something), and the row number
+    is where ``update_title`` refreshes the projection when the DB row changes.
+    A row whose ID cell is not an integer — the header, or a row typed into the
+    Sheet by hand — has no DB row to index, so it is skipped (but still counts
+    toward row numbering). A missing Date Applied cell (the Sheets API
+    truncates trailing blanks) reads as the empty string, i.e. "tracked but not
+    yet applied".
+    """
+    params = {"spreadsheetId": sheet_id, "range": TRACKER_RANGE}
+    response = _run_gws(["sheets", "spreadsheets", "values", "get", "--params", json.dumps(params)])
+    index: dict[int, TrackedRow] = {}
+    # Row 1 is the header, so data enumeration starts at Sheet row 2.
+    for row_number, row in enumerate((response.get("values") or [])[1:], start=2):
+        try:
+            posting_id = int(str(row[_ID_COL]).strip())
+        except (IndexError, ValueError):
+            continue
+        date_applied = row[_DATE_APPLIED_COL] if len(row) > _DATE_APPLIED_COL else ""
+        index[posting_id] = TrackedRow(
+            row_number=row_number, date_applied=str(date_applied).strip()
+        )
+    return index
+
+
+def update_title(sheet_id: str, row_number: int, title: str) -> None:
+    """Refresh one tracked row's Title cell from the database row.
+
+    The agent-written columns are a projection of ``postings`` (the DB is the
+    source of truth), so when refetch corrects a title, the projection follows
+    — for rows not yet applied to. This writes exactly one cell and can never
+    touch the user's columns. Raises ``TrackerError`` unless the API confirms
+    the updated cell, so a silent no-op cannot masquerade as a refresh.
+    """
+    params = {
+        "spreadsheetId": sheet_id,
+        "range": f"Applications!{_TITLE_COL}{row_number}",
+        "valueInputOption": "USER_ENTERED",
+    }
+    response = _run_gws(
+        [
+            "sheets",
+            "spreadsheets",
+            "values",
+            "update",
+            "--params",
+            json.dumps(params),
+            "--json",
+            json.dumps({"values": [[title]]}),
+        ]
+    )
+    if not response.get("updatedCells"):
+        raise TrackerError(f"the Sheets API reported no updated cell: {response!r}")
 
 
 @dataclass
