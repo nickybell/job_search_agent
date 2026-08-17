@@ -17,13 +17,14 @@ Seed your searches with the titles below and their obvious variants (British/Ame
 - **Customer Education** -- Head / Manager / Director / VP of Customer Education
 - **AI Enablement / AI Adoption** -- Head / Manager / Director / VP of AI Enablement, AI Adoption, AI Transformation, or AI Training / Upskilling / Literacy / Fluency. Internal, employee-facing charters (enabling a company's own workforce on AI) are just as in-scope as customer-facing ones -- treat them as a primary target, not an adjacency.
 - **Customer Experience** -- Head / Manager / Director / VP of Customer Experience (CX)
-- **Adjacent / commonly-blended** -- Head of Academy / Head of [Company] University; Customer or Developer Education; Technical Curriculum Developer; Learning & Development (customer-facing / senior); Developer Relations or Developer Advocacy with an education/enablement charter; Instructional Design (senior, customer-facing)
+- **Adjacent / commonly-blended** -- Head of Academy / Head of [Company] University; Customer Education; Learning & Development (customer-facing / senior)
 
 ## Non-negotiable filters
 
 - **Location:** Fully remote, or hybrid/in-person in the greater Washington, D.C. area. The greater D.C. area means Washington, D.C. itself plus its Maryland and Northern Virginia suburbs -- including (not exhaustively) Arlington, Alexandria, Tysons / Tysons Corner, McLean, Vienna, Falls Church, Fairfax, Reston, Herndon, and Crystal City / National Landing in Virginia, and Bethesda, North Bethesda, Chevy Chase, Rockville, Gaithersburg, Silver Spring, and College Park in Maryland. A posting naming any of these localities counts as in-area; for a locality not listed, the test is whether the office is within commuting distance of Washington, D.C. Resolve ambiguous remote postings this way: "remote (US)" / "remote, US" -> include; remote restricted to a non-US region or an incompatible timezone -> exclude; hybrid or on-site -> include only if the office is in the area defined above.
 - **Industry:** Exclude any employer whose core business is healthcare, health tech, pharma, or insurance. This is a company-level test on the employer's primary business, not on the role's content -- an education role at a health-insurance company is out, while a horizontal product that merely sells into healthcare among other verticals is in. Unlike the fit signals below, this is a hard filter: do not surface these for downstream review.
-- **Salary:** Minimum base salary $165,000. **Apply this only when a range is actually published:** exclude a posting only if its stated range tops out below $165,000. Most postings omit compensation -- a posting with no stated salary is *included*, never dropped for missing comp. (Recall over precision: a borderline or unstated-comp role is Step 3's call, not the search agent's.)
+- **Company type:** Exclude employers whose *core business* is professional / managed services, consulting or systems-integration, staffing / outsourcing, or investing -- a holding company, private-equity firm, or acquirer that runs portfolio companies rather than building its own product (e.g. Cordance). Like Industry, this is a company-level test on the employer's primary business -- read from the JD's "who we are / what we do" front matter, not from the role's content: Nicky wants to work *for a company that builds its own product(s)*. A product company with an incidental services or professional-services arm stays in; only firms whose primary business is services or investment are excluded. When the front matter is genuinely ambiguous about whether the company builds its own product, include it and let review decide.
+- **Salary:** Minimum base salary $150,000. **Apply this only when a range is actually published:** exclude a posting only if its stated range tops out below $150,000. A stated top-of-range below $150,000 is excluded even when the posting hints at flexibility ("may pay more or less than the posted range," equity or bonus upside) -- the *stated* range is what governs. Most postings omit compensation -- a posting with no stated salary is *included*, never dropped for missing comp. (Recall over precision: a borderline or unstated-comp role is Step 3's call, not the search agent's.)
 - **Search window:** Only include postings published or updated within {{SEARCH_WINDOW}}, judged by the recency rules in "Liveness and verifiability" below. When the employer's page and an aggregator disagree about a posting's age, the employer's date wins.
 - **No "Lead" Roles:** Head, Manager, Director, and VP roles are all acceptable for inclusion. The specific terminology "Lead" -- which is typically used in the United States to designate a senior IC role -- should not be included in search results.
 
@@ -41,7 +42,7 @@ At minimum, cover:
 - LinkedIn Jobs.
 - Aggregators and curated boards: Built In (national and DC), Otta / Welcome to the Jungle, Wellfound, The Muse, and the AI-specific boards (ai-jobs.net, Cerebral Valley).
 - Remote-first boards, given the remote location filter: We Work Remotely, Remotive, and Himalayas (better-curated, with real seniority and role-category filters — favor it for senior CX/enablement over raw remote feeds).
-- Niche boards for this space: The Learning Guild; DevRel Collective, devrel.jobs; Gain Grow Retain, Customer Success Collective, Sales Enablement Collective.
+- Niche boards for this space: The Learning Guild; Gain Grow Retain, Customer Success Collective, Sales Enablement Collective.
 - VC and accelerator portfolio boards — high-yield because growth-stage AI companies standing up an education function for the first time often post only there, and their boards link straight through to the underlying ATS posting: a16z, Sequoia, Bessemer, Insight, General Catalyst, First Round, YC. Many run on Getro or Consider, so searching the platform domain hits many funds at once.
 - The current monthly Hacker News “Ask HN: Who is hiring?” thread — high-signal for the same 0-to-1, first-enablement-hire startups the VC boards surface: seed/early-stage companies standing up an education or enablement function post there, and top-level comments routinely link straight to the company's ATS posting, so many hits resolve directly to a supported host. Noisy, so lead with the target titles as in-thread search terms.
 
@@ -83,7 +84,7 @@ When in doubt, include -- recall over precision.
 Use these phrases as search queries in their own right, and as confidence that a posting belongs in the output. A strong role may use only a few of them; absence of positive signals is not a reason to exclude.
 
 **Mission and philosophy**
-- "Teach," "educate," "enable," "empower," "grow," "level up," "upskill" customers/users/developers
+- "Teach," "educate," "enable," "empower," "grow," "level up," "upskill" customers/users
 - "Meet learners where they are," "learner-centered"
 - "Help customers succeed with," "drive adoption through education," "reduce time-to-value"
 - "Democratize," "make [complex thing] accessible," "translate technical concepts for non-technical audiences"
@@ -92,7 +93,8 @@ Use these phrases as search queries in their own right, and as confidence that a
 - "Build trust in AI," "human-in-the-loop," teaching judgment and critical thinking about AI outputs (not just tool mechanics)
 
 **The actual work (strong fit)**
-- "Design and build curriculum / courses / learning paths / certification programs"
+- **Direct, hands-on work with customers to drive adoption and retention** -- "embed with customers," "in the field / in the trenches with accounts," "drive product adoption," "reduce time-to-value and churn," "own customer outcomes": enablement as a success/retention function, working *with* customers rather than producing materials for them at a remove
+- "Design and build curriculum / courses / learning paths / certification programs" -- a strong signal when it serves that hands-on enablement charter, not when content production *is* the whole role
 - "Create technical content, tutorials, docs, workshops, webinars"
 - "Develop and deliver enablement / onboarding programs"
 - "Run customer discovery," "translate customer needs into," "voice of the customer"
@@ -118,7 +120,13 @@ Use these phrases as search queries in their own right, and as confidence that a
 None of these is a reason to drop a posting -- borderline calls stay with the downstream human review. Their only effect is on effort allocation: when the research budget is tight, spend verification turns on postings without them first.
 
 - Delivery-only education: "facilitate training developed by others," "administer the LMS," "deliver our existing curriculum," tool-mechanics training with no ownership of what gets taught or why
-- Enablement housed inside Revenue Operations, or success measured in pipeline, quota, or bookings terms
+- Curriculum or content production as the entire job -- authoring courses, staffing an "academy" / "university," or classroom-style instruction with no direct, ongoing customer engagement and no ownership of adoption / retention outcomes. Nicky's target is hands-on enablement "in the trenches" with customers (a success/retention function), not producing training material at a remove; a role that is teaching / curriculum-authoring end to end, however senior, is a weak fit -- discernible from whether the JD describes working *with customers* or only *producing materials for* them
+- Enablement housed inside Revenue Operations, or success measured in pipeline, quota, bookings, or account-expansion / upsell terms -- including "Enterprise Success" / "Customer Success" roles whose real charter is growing accounts rather than teaching customers
+- Enablement / education vocabulary fronting a different function -- a title or body that borrows "enable / educate / adoption / literacy" language while the actual charter is: information security / IT / infrastructure (e.g. "AI Enablement & Security" carrying InfoSec or enterprise-IT requirements); data governance or data/AI governance (a functional data-science role); management consulting or professional-services delivery (tells: "consulting experience at Accenture / Deloitte / McKinsey a plus," or a company shifting from a product-led to a services-led motion); partnerships / partner-integrations / channel work; or customer-experience *operations* at scale (owning a support-center network, optimizing deflection / CSAT) as distinct from CX that drives product adoption
+- Engineering-grade technical depth a non-SWE can't credibly claim -- "solutions architect / field architect / technical-sales experience required," curriculum or enablement *engineering* for infrastructure / database / distributed-systems products, or deep DBMS / OLAP / systems prerequisites. Customer Education about a product's real-world use is in scope; SWE-depth technical enablement is not
+- Functional enablement gated on domain experience Nicky lacks -- an AI- or enablement charter scoped to one business function (marketing, legal / legal-ops, finance) that names multi-year experience *in that function* as a requirement. Cross-functional product enablement is in scope; being the marketing or legal domain expert is not
+- Executive scope above a functional Head / VP -- enterprise-wide mandates requiring ~15+ years, setting board- or executive-level direction, reporting directly into the C-suite, or owning an org-wide (thousands-of-employees) L&D or CX strategy. Manager through VP / Head-of a *function* stays firmly in target; this is only about altitude beyond that
+- Third-party-vendor certification / training -- programs built around teaching an external technology stack the employer resells or partners on (e.g. Microsoft, AWS, Salesforce-admin certification) rather than education about the employer's own product
 - AI framed as headcount efficiency: automation pitched as replacing people or "doing more with less" rather than making people more capable
 - Purely deterministic, back-office problem spaces with no human-behavior dimension: supply-chain optimization, data normalization, infrastructure tooling
 - Agency-style bespoke client delivery with no compounding product or program
@@ -133,8 +141,9 @@ Exclude a posting for its content only when the **title itself** is disqualifyin
 - Pure community titles: Head / Manager / Director / VP of Community, Community Manager -- out of scope unless the title itself carries an education or enablement charter (e.g. "Education & Community")
 - Chief of Staff titles
 - Revenue Operations / RevOps titles
+- Developer-facing titles: Developer Relations / DevRel, Developer Advocate / Developer Advocacy, Developer Evangelist, and Developer Education -- or any title whose primary audience is developers / software engineers. Nicky is technical but has never been a SWE, so these skew too technical and center the wrong audience; they are excluded even when wrapped in education or enablement language.
 
-(The non-negotiable filters above -- location, industry, salary, search window, "Lead" -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
+(The non-negotiable filters above -- location, industry, company type, salary, search window, "Lead" -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
 
 ## Liveness and verifiability (hard gates)
 

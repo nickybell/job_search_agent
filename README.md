@@ -238,6 +238,44 @@ window each search day (Claude Deep Research + Perplexity Agent API).
 > **Cost note:** watch the first few A-day (Claude Opus) runs' spend before
 > trusting the cron unattended.
 
+**5. Update the running cron after a code or prompt change.** The search prompt
+(`deep_research_prompt.md`) and all of `src/` are **baked into the image**, and the
+scheduled machine is pinned to the image it was created with — so editing files
+locally changes nothing until you build a new image and move that machine onto it.
+The build context is your working directory (`.dockerignore` excludes `.git`), so
+uncommitted edits are picked up as-is; you don't have to commit before redeploying
+(though you should, for history's sake).
+
+Update the machine **in place** — do *not* destroy and recreate it: a fresh
+`--schedule` machine re-anchors its daily fire to creation time (~24h out), so
+you'd skip the next run.
+
+```bash
+# 1. Build + push a new image (no release; machines run registry images directly).
+#    The explicit label makes the resulting ref predictable.
+fly deploy --build-only --push --image-label prompt-$(date +%Y%m%d)
+#    -> registry.fly.io/<app>:prompt-YYYYMMDD
+
+# 2. Find the scheduled machine (the row whose schedule = daily).
+fly machine list
+
+# 3. Swap ONLY the image. --vm-memory 1024 is mandatory here too (fly machine *
+#    ignores fly.toml's [[vm]] block) or the machine drops to 256MB and hangs on `initialize`.
+fly machine update <machine-id> --image registry.fly.io/<app>:prompt-YYYYMMDD --vm-memory 1024
+
+# 4. Confirm: new image, 1GB memory, and schedule still `daily`.
+fly machine status <machine-id>
+```
+
+An in-place `--image` swap keeps the machine's schedule and restart policy — only
+the image changes, and the next scheduled wake runs the new code. If step 4 shows
+the schedule was dropped, re-assert it without rebuilding:
+`fly machine update <machine-id> --schedule daily --vm-memory 1024`. A full
+`fly deploy` release is deliberately **not** used: this app has never had one
+(hence the `--stage` secrets above and `--build-only` here, neither of which
+creates a release), and a release can normalize the machine against `fly.toml`,
+which carries no schedule.
+
 ## How this was built
 
 This repo is also a worked example of how I build with AI coding tools.

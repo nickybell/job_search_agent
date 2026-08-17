@@ -162,7 +162,19 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 
 ## Empty PRD sections to fill
 
-- [ ] **Search Prompt Updates from "Ground Truth"** — the mechanism by which `fit_feedback` refines the Step 1 search prompt on the daily cron.
+- [~] **Search Prompt Updates from "Ground Truth"** — the *manual* refinement pass
+  (translation rules + the first 2026-08-16 round) is now documented in `prd.md`.
+  **Still open:** automating it on the daily cron. The mechanism stays undesigned
+  because an agent editing its own search prompt needs guardrails so the
+  recall-first stance and the JSON-contract / `{{SEARCH_WINDOW}}` / liveness
+  machinery stay untouched — for now the pass is run by hand.
+  - Both fit-criteria initially deferred from this round were **resolved 2026-08-16**
+    after Nicky confirmed they're discernible from the JD's "who we are" front
+    matter: a **company-type filter** (product companies only; consulting /
+    services / PE-holdco excluded) and a **hands-on-vs-teaching** reframe
+    (content-production / Ivory-Tower roles demoted to a negative signal, direct
+    customer-adoption work made the lead positive). See the refinement-round
+    record in `prd.md`.
 
 ## Cross-cutting gaps not owned by any section
 
