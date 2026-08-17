@@ -84,22 +84,18 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   validation of Step 1 and of the still-open **B-day liveness parity** question
   (see below). Watch the first few A-day (Opus) runs' spend before trusting the
   cron.
-- [ ] **Run the bounded A/B trial (~7 cron days).** For the first week, run
-  `uv run jsa search --both` (or point the cron at it) so Claude and Perplexity
-  search the *same* window each day and both findings land in `search_findings`
-  — the day-of-year alternation confounds agent with day and can't A/B. Review
-  as normal, then `uv run jsa ab-report` for coverage / overlap / Apply
-  precision. Revert the cron to single-agent alternation afterward. Open
-  sub-decisions:
-  - [ ] Trial length — 7 days assumed; extend if daily volume is thin.
-  - [ ] Run the trial locally by hand vs. point the Fly cron at `--both` for the
-    week (doubles daily spend: ~A-day + B-day cost per run, ~$8.13 + ~$4.44 at
-    the 7-day-window rates measured 2026-08-06). **Currently the `jsa cron`
-    entrypoint runs `--both` on every Mon/Wed/Fri search day** — revert it to the
-    single-agent day-of-year alternation (`select_agent_for_date`) when the trial
-    ends.
-  - [ ] Success metric weighting — pure Apply-precision vs. unique-Apply yield
-    (which agent is the *sole* source of good roles) vs. cost-per-Apply.
+- [X] **Bounded A/B trial — concluded 2026-08-17.** The trial ran Claude and
+  Perplexity over the *same* window (`jsa search --both`, since removed) so both
+  findings landed in `search_findings`, with `jsa ab-report` joining
+  `search_findings` → `postings` for coverage / overlap / Apply precision.
+  **Outcome:** Perplexity surfaced materially more qualifying roles — its higher
+  unique yield outweighs its lower Apply precision — while Claude still found some
+  roles Perplexity missed. So the cron now runs **Perplexity on Mon/Wed/Fri plus
+  a weekly Claude 168h sweep on Fridays (Claude first)**, encoded in
+  `pipeline.CRON_SCHEDULE`; the day-of-year alternation and the `--both`
+  scaffolding are gone. `search_findings` / `jsa ab-report` stay, since Friday
+  still runs both agents (over different windows) and the telemetry keeps
+  accruing.
 - [X] **Fly.io deployment.** `fly auth signup`/`login`, `fly launch --no-deploy`
   (reuses the committed `fly.toml`), `fly secrets set --stage` the four secrets
   (`--stage` is required — this app has never gone through a `fly deploy`
@@ -112,8 +108,9 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `fly.toml`'s `[[vm]]` block, so it silently defaults to `shared-cpu-1x`
   (256MB), which isn't enough for the Claude Agent SDK's bundled CLI subprocess
   (it hangs on `initialize` rather than failing loudly — this is what broke the
-  2026-08-10 go-live). The image entrypoint is `jsa cron`, which self-gates to a
-  **Mon (72h) / Wed (48h) / Fri (48h)** cadence and no-ops on other days — Fly's
+  2026-08-10 go-live). The image entrypoint is `jsa cron`, which self-gates against
+  `pipeline.CRON_SCHEDULE` — **Perplexity Mon (72h) / Wed (48h) / Fri (48h), plus
+  a weekly Claude 168h sweep on Fridays** — and no-ops on other days — Fly's
   fuzzy `daily` schedule has no weekday selector, so the weekday+window logic
   lives in the container.
 - [ ] **Rotate the leaked credentials before publishing.** The Turso auth

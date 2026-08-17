@@ -10,7 +10,7 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
-| 1 | Daily job search, alternating Claude Deep Research (even days) and Perplexity Agent API deep research (odd days) | Fly.io cron (headless) |
+| 1 | Daily job search — Perplexity Agent API deep research on Mon/Wed/Fri, plus a weekly Claude Deep Research sweep on Fridays | Fly.io cron (headless) |
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
@@ -51,7 +51,7 @@ Credentials (see `.env.example` for details): a Turso database URL + token, an A
 
 ```bash
 uv run jsa init-db                              # create the postings table
-uv run jsa search                              # run today's search (agent auto-selected by date)
+uv run jsa search                              # run one search (defaults to Perplexity, 48h window)
 uv run jsa search --agent perplexity --window-hours 72   # explicit agent + window
 uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one posting by hand
 uv run jsa review                              # work through the fit-review backlog
@@ -194,7 +194,7 @@ turso db tokens create job-search-agent       # -> TURSO_AUTH_TOKEN
 Put both in your local `.env`, then `uv run jsa init-db` to create the table.
 
 **2. API keys.** Create an [Anthropic API key](https://console.anthropic.com/) (with
-billing enabled — A-day runs are Opus deep-research sessions) and a
+billing enabled — the weekly Friday run is an Opus deep-research session) and a
 [Perplexity API key](https://www.perplexity.ai/settings/api). Add both to `.env`
 for local runs.
 
@@ -223,19 +223,22 @@ fly machine run . --rm --vm-memory 1024                                  # one-o
 fly machine run . --schedule daily --restart on-fail --vm-memory 1024    # wakes daily at ~the creation time (ET)
 ```
 
-The image's entrypoint is `jsa cron`, which **self-gates by ET weekday**:
-it searches on **Monday (72h window, covering the weekend)**, **Wednesday (48h)**,
-and **Friday (48h)**, and exits quietly on every other day. So a single fuzzy
-`--schedule daily` machine produces the Mon/Wed/Fri cadence — Fly's scheduler
-has no weekday selector or per-run args, so the weekday logic lives in the
-container. Create the scheduled machine **at your intended morning hour** (the
+The image's entrypoint is `jsa cron`, which **self-gates by ET weekday** against
+`pipeline.CRON_SCHEDULE`: it runs **Perplexity on Monday (72h, covering the
+weekend)**, **Wednesday (48h)**, and **Friday (48h)**, plus a weekly **Claude
+Deep Research sweep (168h) on Friday that runs first**, and exits quietly on
+every other day. So a single fuzzy `--schedule daily` machine produces the whole
+weekly cadence — Fly's scheduler has no weekday selector or per-run args, so the
+weekday logic lives in the container. Create the scheduled machine **at your intended morning hour** (the
 daily interval fires ~24h after creation). The windows overlap by design, so a
 missed or doubled fuzzy fire is harmless — re-inserts no-op on `canonical_url`.
 
-During the current A/B trial, `jsa cron` runs **both** agents over the same
-window each search day (Claude Deep Research + Perplexity Agent API).
+The A/B trial (Claude and Perplexity over the same window every search day) has
+concluded: Perplexity surfaced more qualifying roles, so it now carries the
+Mon/Wed/Fri cadence while Claude is kept as a weekly Friday sweep. Per-agent
+attribution still lands in `search_findings`; `jsa ab-report` summarizes it.
 
-> **Cost note:** watch the first few A-day (Claude Opus) runs' spend before
+> **Cost note:** watch the first few Friday (Claude Opus) runs' spend before
 > trusting the cron unattended.
 
 **5. Update the running cron after a code or prompt change.** The search prompt

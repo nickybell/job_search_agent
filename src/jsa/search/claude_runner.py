@@ -1,4 +1,4 @@
-"""A-day search: Claude Deep Research via the Claude Agent SDK.
+"""Claude Deep Research search via the Claude Agent SDK.
 
 Run headless on the cron with ``claude-opus-4-8`` at high effort — long-horizon
 agentic web research with hard liveness gates rewards Opus-tier
@@ -141,5 +141,5 @@ async def _run(prompt: str) -> str:
 
 
 def run_claude_search(prompt: str) -> str:
-    """Run the A-day Claude Deep Research search and return its raw output."""
+    """Run the Claude Deep Research search and return its raw output."""
     return anyio.run(_run, prompt)

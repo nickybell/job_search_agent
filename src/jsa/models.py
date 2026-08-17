@@ -1,6 +1,6 @@
 """Validated shape of the search agents' structured output (PRD Step 1).
 
-Both the Claude (A-day) and Perplexity (B-day) runners must return the same
+Both the Claude and Perplexity runners must return the same
 ``postings`` JSON contract defined in ``prd.md`` and ``deep_research_prompt.md``.
 Parsing raw model output through these pydantic models is what guarantees a
 malformed response is caught before it reaches the database.
