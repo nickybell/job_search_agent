@@ -41,6 +41,12 @@ def packet_dir_name(normalized_company: str, title_slug: str) -> str:
     return f"{normalized_company} - {title_slug}"
 
 
+def write_job_posting(directory: Path, jd_markdown: str) -> None:
+    """Write the packet's ``job_posting.md`` (shared with refetch's rebuild)."""
+    text = jd_markdown if jd_markdown.endswith("\n") else jd_markdown + "\n"
+    (directory / "job_posting.md").write_text(text, encoding="utf-8")
+
+
 @dataclass
 class PacketResult:
     """What happened (or would happen) for one posting's packet directory."""
@@ -120,8 +126,7 @@ def run_packet(
             else:
                 result.status = "created"
                 if jd_markdown:
-                    text = jd_markdown if jd_markdown.endswith("\n") else jd_markdown + "\n"
-                    (result.path / "job_posting.md").write_text(text, encoding="utf-8")
+                    write_job_posting(result.path, jd_markdown)
         if result.status == "exists":
             summary.skipped_existing += 1
         else:

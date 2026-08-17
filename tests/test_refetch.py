@@ -35,6 +35,15 @@ class IndexStub:
 
 
 @pytest.fixture(autouse=True)
+def packets_root(tmp_path, monkeypatch):
+    # Autouse: the packet-rebuild path deletes directories, so no test may
+    # ever see the real ~/Documents packet root.
+    root = tmp_path / "packets"
+    monkeypatch.setenv("JSA_PACKETS_DIR", str(root))
+    return root
+
+
+@pytest.fixture(autouse=True)
 def sheet_index(monkeypatch) -> IndexStub:
     # Autouse so no test can accidentally shell out to the real gws CLI for
     # the Sheet index read; default is an empty Sheet (nothing tracked).
@@ -99,18 +108,34 @@ def row(client, posting_id) -> dict:
 # --- diff_row (pure) -------------------------------------------------------
 
 
+def _row(jd="x"):
+    # Shape must match db.rows_for_refetch: (id, url, title, location,
+    # added_to_tracker, normalized_company, title_slug, jd_markdown).
+    return (7, GREENHOUSE_URL, OLD_TITLE, "Remote", 0, "Acme", OLD_TITLE, jd)
+
+
 def test_diff_row_flags_a_retitled_posting():
     result = refetch.diff_row(
-        (7, GREENHOUSE_URL, OLD_TITLE, "Remote", 0),
+        _row(),
         ATSDetail(jd_markdown="x", location="Remote", title=NEW_TITLE),
     )
     assert result.changed_fields == ["title"]
     assert (result.title_before, result.title_after) == (OLD_TITLE, NEW_TITLE)
 
 
+def test_diff_row_flags_a_rewritten_description():
+    # A JD edit under a stable title is exactly the drift that invalidates a
+    # packet, so it must register on its own.
+    result = refetch.diff_row(
+        _row(jd="the original JD"),
+        ATSDetail(jd_markdown="the revised JD", location="Remote", title=OLD_TITLE),
+    )
+    assert result.changed_fields == ["description"]
+
+
 def test_diff_row_reports_no_change_when_the_ats_still_agrees():
     result = refetch.diff_row(
-        (7, GREENHOUSE_URL, OLD_TITLE, "Remote", 0),
+        _row(),
         ATSDetail(jd_markdown="x", location="Remote", title=OLD_TITLE),
     )
     assert result.changed is False
@@ -119,7 +144,7 @@ def test_diff_row_reports_no_change_when_the_ats_still_agrees():
 def test_diff_row_ignores_a_missing_ats_title():
     # An ATS record without a title must not read as "retitled to nothing".
     result = refetch.diff_row(
-        (7, GREENHOUSE_URL, OLD_TITLE, "Remote", 0),
+        _row(),
         ATSDetail(jd_markdown="x", location=None, title=None),
     )
     assert result.changed_fields == []
@@ -141,7 +166,7 @@ def test_a_retitled_posting_is_updated_and_the_slug_re_derived(config, client, s
     assert stored["title_slug"] == NEW_TITLE
     assert stored["jd_markdown"] == "the revised JD"
     assert stored["location"] == "Remote, US"
-    assert results[0].changed_fields == ["title", "location"]
+    assert results[0].changed_fields == ["title", "description", "location"]
 
 
 def test_dry_run_reports_without_writing(config, client, stub_fetch):
@@ -325,7 +350,7 @@ def test_a_failed_index_read_fails_loudly_in_the_default_scope(
 
 def test_all_bypasses_the_apply_filter(config, client, stub_fetch):
     seed(client, decision="Skip")
-    stub_fetch(ATSDetail(jd_markdown="x", location=None, title=NEW_TITLE))
+    stub_fetch(ATSDetail(jd_markdown="the original JD", location=None, title=NEW_TITLE))
 
     summary, results = refetch.run_refetch(config, include_all=True)
 
@@ -352,6 +377,111 @@ def test_all_survives_a_failed_index_read_and_flags_unrefreshed_drift(
     assert (summary.examined, summary.changed, summary.stale_in_tracker) == (1, 1, 1)
     assert row(client, posting_id)["title"] == NEW_TITLE
     assert "check that row by hand" in refetch.describe(results[0])
+
+
+# --- packet rebuild --------------------------------------------------------
+
+
+def make_packet(packets_root, slug=OLD_TITLE):
+    """A pre-existing packet directory with a (stale) resume inside."""
+    path = packets_root / f"Acme - {slug}"
+    path.mkdir(parents=True)
+    (path / "job_posting.md").write_text("the original JD\n")
+    (path / "resume.docx").write_text("stale resume")
+    return path
+
+
+def test_a_changed_job_with_a_packet_gets_it_rebuilt(config, client, stub_fetch, packets_root):
+    # The packet is a derived artifact: when title and JD change, the old
+    # directory (resume included) is deleted and rebuilt — the job no longer
+    # exists as it was packeted, and the missing resume IS the Step 4
+    # regenerate signal.
+    seed(client)
+    old = make_packet(packets_root)
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
+
+    summary, results = refetch.run_refetch(config)
+
+    assert summary.packets_rebuilt == 1
+    assert not old.exists()
+    new = packets_root / f"Acme - {NEW_TITLE}"
+    assert (new / "job_posting.md").read_text() == "the revised JD\n"
+    assert not (new / "resume.docx").exists()
+    assert "rebuilt" in refetch.describe(results[0])
+
+
+def test_a_description_only_change_rebuilds_at_the_same_path(
+    config, client, stub_fetch, packets_root
+):
+    seed(client)
+    old = make_packet(packets_root)
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=OLD_TITLE))
+
+    summary, results = refetch.run_refetch(config)
+
+    assert results[0].changed_fields == ["description"]
+    assert summary.packets_rebuilt == 1
+    assert (old / "job_posting.md").read_text() == "the revised JD\n"
+    assert not (old / "resume.docx").exists()  # stale resume cleared for regen
+
+
+def test_a_location_only_change_leaves_the_packet_untouched(
+    config, client, stub_fetch, packets_root
+):
+    # The packet contains no location, so nothing in it is stale.
+    seed(client)
+    old = make_packet(packets_root)
+    stub_fetch(ATSDetail(jd_markdown="the original JD", location="NYC", title=OLD_TITLE))
+
+    summary, results = refetch.run_refetch(config)
+
+    assert results[0].changed_fields == ["location"]
+    assert summary.packets_rebuilt == 0
+    assert (old / "resume.docx").exists()
+
+
+def test_a_change_without_a_packet_directory_touches_no_disk(
+    config, client, stub_fetch, packets_root
+):
+    # Rebuild only refreshes an existing packet; it never creates one from
+    # scratch — that is jsa packet's job, on its own eligibility rules.
+    seed(client)
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
+
+    summary, _ = refetch.run_refetch(config)
+
+    assert summary.packets_rebuilt == 0
+    assert not (packets_root / f"Acme - {NEW_TITLE}").exists()
+
+
+def test_dry_run_reports_the_pending_rebuild_without_touching_disk(
+    config, client, stub_fetch, packets_root
+):
+    seed(client)
+    old = make_packet(packets_root)
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
+
+    summary, results = refetch.run_refetch(config, dry_run=True)
+
+    assert summary.packets_rebuilt == 1
+    assert (old / "resume.docx").exists()
+    assert "would be rebuilt" in refetch.describe(results[0])
+
+
+def test_rebuild_refuses_to_clobber_a_distinct_directory_at_the_new_name(
+    config, client, stub_fetch, packets_root
+):
+    seed(client)
+    old = make_packet(packets_root)
+    make_packet(packets_root, slug=NEW_TITLE)  # someone else's packet, or a collision
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
+
+    summary, results = refetch.run_refetch(config)
+
+    assert summary.packets_rebuilt == 0
+    assert (old / "resume.docx").exists()  # nothing deleted
+    assert results[0].packet_error
+    assert "NOT rebuilt" in refetch.describe(results[0])
 
 
 def test_id_targets_a_single_row_and_still_refreshes_its_tracker_title(

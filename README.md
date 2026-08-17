@@ -127,6 +127,13 @@ its sheet copy stays frozen as the record of what you submitted. The Sheet
 index read fails loudly in the default scope rather than guessing; under
 `--id`/`--all` it's best-effort and only enables the Title refresh.
 
+If the job already has a packet directory, a title or JD change **rebuilds
+it** — new name, fresh `job_posting.md`. The packet is a derived artifact
+(the resume, once Step 4 exists, is regenerated from the base resume plus the
+JD), so the stale copy is deleted rather than archived, and the missing resume
+is itself the regenerate signal. The delete only ever targets the exact
+expected old directory, and a location-only change touches nothing.
+
 ```bash
 uv run jsa refetch --dry-run   # what has changed upstream, without writing
 uv run jsa refetch             # reconcile Apply postings not yet applied to
