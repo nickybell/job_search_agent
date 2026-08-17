@@ -39,6 +39,7 @@ refresh, and its failure downgrades to the flag.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -68,6 +69,8 @@ class RowResult:
     changed_fields: list[str] = field(default_factory=list)
     unresolved: bool = False
     error: str | None = None
+    jd_before: str | None = None  # set only when the description changed,
+    jd_after: str | None = None  # so describe() can render the diff
     sheet_row: int | None = None  # Sheet row to refresh: tracked & unapplied only
     sheet_updated: bool = False
     sheet_error: str | None = None
@@ -137,6 +140,8 @@ def diff_row(row: tuple, detail) -> RowResult:
     new_jd = getattr(detail, "jd_markdown", None)
     if new_jd and new_jd != jd_before:
         result.changed_fields.append("description")
+        result.jd_before = jd_before
+        result.jd_after = new_jd
     new_location = getattr(detail, "location", None)
     if new_location and new_location != location:
         result.changed_fields.append("location")
@@ -280,6 +285,22 @@ def _refetch_one(
     return result
 
 
+def _jd_diff_lines(before: str | None, after: str | None) -> list[str]:
+    """A unified diff of the stored vs. fetched JD, indented for describe().
+
+    The full texts are multi-KB, so dumping both would drown the report; the
+    hunks alone show exactly what the employer edited. The ---/+++ file
+    headers are dropped (there are no files, only the stored and ATS copies).
+    """
+    diff = difflib.unified_diff(
+        (before or "").splitlines(),
+        (after or "").splitlines(),
+        n=2,
+        lineterm="",
+    )
+    return [f"        {line}" for line in diff if not line.startswith(("---", "+++"))]
+
+
 def _plan_packet_rebuild(result: RowResult, normalized_company: str, old_slug: str) -> None:
     """Mark a stale packet directory for rebuild, if one exists on disk.
 
@@ -351,6 +372,9 @@ def describe(result: RowResult) -> str:
                 "      NOTE: already in the tracker Sheet, but its row could not be "
                 "matched (or is already applied to) — check that row by hand."
             )
+    if "description" in result.changed_fields:
+        lines.append("      description diff:")
+        lines.extend(_jd_diff_lines(result.jd_before, result.jd_after))
     if result.packet_error:
         lines.append(f"      NOTE: stale packet directory NOT rebuilt — {result.packet_error}")
     elif result.packet_rebuilt:
