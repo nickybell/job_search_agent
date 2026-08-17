@@ -14,7 +14,7 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
-| 5 | Append `Apply` postings to the write-only Google Sheet application tracker | Local terminal |
+| 5 | Append `Apply` postings to the Google Sheet application tracker | Local terminal |
 
 Step 4 (per-job resume revisions) and the “ground truth” prompt-refinement cron are specified in `prd.md` and will be built later. Until Step 4 exists, Step 5 is triggered by hand off the `Apply` decision rather than off a generated resume packet — see the interim note in `prd.md`.
 
@@ -118,16 +118,20 @@ untouched rather than trading a good capture for a blip, and a posting that has
 vanished from its board is reported, not deleted.
 
 It focuses on the postings where drift could still change what you do next:
-`Apply` rows you haven't applied to yet. "Applied" lives only in the tracker
-Sheet's `Date Applied` column, so refetch does the agent's one read-only Sheet
-lookup (by the ID column) to scope itself — and fails loudly if that lookup
-fails, rather than guessing.
+`Apply` rows that are either absent from the tracker Sheet *or* sitting there
+without a `Date Applied`. The database is the source of truth and the tracker
+is its human-readable projection, so a corrected title is also written back to
+the tracker row's Title cell (matched by the ID column) when the job hasn't
+been applied to — and once you *have* applied, the row is skipped entirely and
+its sheet copy stays frozen as the record of what you submitted. The Sheet
+index read fails loudly in the default scope rather than guessing; under
+`--id`/`--all` it's best-effort and only enables the Title refresh.
 
 ```bash
 uv run jsa refetch --dry-run   # what has changed upstream, without writing
 uv run jsa refetch             # reconcile Apply postings not yet applied to
-uv run jsa refetch --all       # every stored row, no Sheet lookup (drift on tracked rows is flagged)
-uv run jsa refetch --id 42     # one row, no Sheet lookup
+uv run jsa refetch --all       # every stored row, regardless of decision or tracker state
+uv run jsa refetch --id 42     # one row, selected unconditionally
 ```
 
 ### Preparing application packets

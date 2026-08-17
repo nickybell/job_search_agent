@@ -213,10 +213,12 @@ def refetch_command(posting_id: int | None, include_all: bool, dry_run: bool) ->
     the ATS-canonical title wins and ``title_slug`` is re-derived from it. A
     failed fetch leaves the row untouched rather than blanking a good capture.
 
-    Defaults to Apply postings not yet applied to, per the tracker Sheet's
-    Date Applied column — the ones where a change could still change your next
-    action. That scope lookup is the Sheet's one sanctioned read and needs the
-    local ``gws`` CLI; ``--id`` and ``--all`` skip it.
+    Defaults to Apply postings either absent from the tracker Sheet or without
+    a Date Applied there — the ones where a change could still change your next
+    action. A corrected title is also propagated to the tracker row's Title
+    cell when the job sits there unapplied (the Sheet is a projection of the
+    database). The Sheet index read needs the local ``gws`` CLI; under ``--id``
+    and ``--all`` it is best-effort and only enables that Title refresh.
     """
     _configure_logging()
     config = load_config()
