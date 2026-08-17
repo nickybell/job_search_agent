@@ -61,6 +61,13 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   itself, and **propagates a corrected Title to the tracker row** when the job
   sits there unapplied (DB first, Sheet second; a failed Sheet write degrades
   to a flagged hand-fix). Recorded in `prd.md` (Application Tracker).
+- **Stale packets are rebuilt, not archived.** When refetch changes a title or
+  JD on a row with an existing packet directory, the directory (resume
+  included) is deleted and rebuilt — packets are derived artifacts, the job
+  "no longer exists as it was packeted" (Nicky), and the missing resume is
+  Step 4's regenerate signal. An `Archived/` tree was considered and rejected.
+  Guards: exact-path delete only, never clobbers a distinct dir at the new
+  name, location-only changes touch nothing, dry-run only reports.
 - **Tracker sheet gained an `ID` column** (now A:H, ID first) so Sheet rows
   join back to `postings.id` without URL comparison. The live sheet was
   restructured in place: column inserted, header formatted, existing rows

@@ -363,7 +363,10 @@ def rows_for_refetch(
     not mirror. ``include_all`` widens to every stored row regardless of
     decision or tracker state; ``posting_id`` targets one row unconditionally.
     """
-    sql = "SELECT id, url, title, location, added_to_tracker FROM postings"
+    sql = (
+        "SELECT id, url, title, location, added_to_tracker, "
+        "normalized_company, title_slug, jd_markdown FROM postings"
+    )
     params: tuple = ()
     if posting_id is not None:
         sql += " WHERE id = ?"
