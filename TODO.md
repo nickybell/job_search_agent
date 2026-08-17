@@ -42,6 +42,41 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 - Tests for the Step 1–2 search runners — the only substantial untested area
   left; exercising them means real API spend, so they stay manual for now.
 
+## Added 2026-08-16 (`feat/packet-cmd-refetch-scope-tracker-id`)
+
+- **`jsa packet`** — Step 4's steps 1–2 (the fail-if-exists `mkdir` guard and
+  `job_posting.md`) as a deterministic CLI command. Default queue is Apply +
+  untracked; `--id` waives the tracker condition (the interim track-on-Apply
+  trigger tracks rows before packets exist) but never the Apply one.
+- **`jsa refetch` rescoped** to postings where drift could still change an
+  action: `Apply` rows that are absent from the tracker Sheet OR have no
+  `Date Applied` there. A failed index read aborts the default scope;
+  `--id`/`--all` select unconditionally, so for them the read is best-effort.
+- **The Sheet relationship reframed (superseding "write-only"/"append-only").**
+  Nicky's articulation: two concepts had been conflated — where authority
+  lives vs. which operations are permitted. The principle is that the database
+  is the source of truth for posting data and the tracker is its human-readable
+  projection plus his workspace columns (`Date Applied`, `Status`, which only
+  he writes). Consequences implemented: refetch reads the Sheet index to scope
+  itself, and **propagates a corrected Title to the tracker row** when the job
+  sits there unapplied (DB first, Sheet second; a failed Sheet write degrades
+  to a flagged hand-fix). Recorded in `prd.md` (Application Tracker).
+- **Stale packets are rebuilt, not archived.** When refetch changes a title or
+  JD on a row with an existing packet directory, the directory (resume
+  included) is deleted and rebuilt — packets are derived artifacts, the job
+  "no longer exists as it was packeted" (Nicky), and the missing resume is
+  Step 4's regenerate signal. An `Archived/` tree was considered and rejected.
+  Guards: exact-path delete only, never clobbers a distinct dir at the new
+  name, location-only changes touch nothing, dry-run only reports.
+- **Tracker sheet gained an `ID` column** (now A:H, ID first) so Sheet rows
+  join back to `postings.id` without URL comparison. The live sheet was
+  restructured in place: column inserted, header formatted, existing rows
+  backfilled by URL match; data validation / conditional formatting verified
+  intact after the shift.
+- [ ] **Review the new/updated tests** (`test_packet.py`, refetch scope tests,
+  tracker A:H tests) — same standing rule as the suite below: agent-authored
+  tests are provisional until you've read them.
+
 ## What needs you (setup before the first run)
 
 - [X] **First live searches.** Run `uv run jsa search --agent claude` and

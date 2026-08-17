@@ -14,7 +14,7 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
-| 5 | Append `Apply` postings to the write-only Google Sheet application tracker | Local terminal |
+| 5 | Append `Apply` postings to the Google Sheet application tracker | Local terminal |
 
 Step 4 (per-job resume revisions) and the “ground truth” prompt-refinement cron are specified in `prd.md` and will be built later. Until Step 4 exists, Step 5 is triggered by hand off the `Apply` decision rather than off a generated resume packet — see the interim note in `prd.md`.
 
@@ -55,7 +55,8 @@ uv run jsa search                              # run today's search (agent auto-
 uv run jsa search --agent perplexity --window-hours 72   # explicit agent + window
 uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one posting by hand
 uv run jsa review                              # work through the fit-review backlog
-uv run jsa refetch --dry-run                   # report postings whose ATS record has drifted
+uv run jsa refetch --dry-run                   # report drift on Apply postings not yet applied to
+uv run jsa packet --dry-run                    # preview the application-packet directories
 uv run jsa track --dry-run                     # preview the tracker rows
 uv run jsa track                               # append Apply postings to the Sheet
 ```
@@ -116,16 +117,52 @@ description and location refreshed alongside. A failed fetch leaves the row
 untouched rather than trading a good capture for a blip, and a posting that has
 vanished from its board is reported, not deleted.
 
+It focuses on the postings where drift could still change what you do next:
+`Apply` rows that are either absent from the tracker Sheet *or* sitting there
+without a `Date Applied`. The database is the source of truth and the tracker
+is its human-readable projection, so a corrected title is also written back to
+the tracker row's Title cell (matched by the ID column) when the job hasn't
+been applied to — and once you *have* applied, the row is skipped entirely and
+its sheet copy stays frozen as the record of what you submitted. The Sheet
+index read fails loudly in the default scope rather than guessing; under
+`--id`/`--all` it's best-effort and only enables the Title refresh.
+
+If the job already has a packet directory, a title or JD change **rebuilds
+it** — new name, fresh `job_posting.md`. The packet is a derived artifact
+(the resume, once Step 4 exists, is regenerated from the base resume plus the
+JD), so the stale copy is deleted rather than archived, and the missing resume
+is itself the regenerate signal. The delete only ever targets the exact
+expected old directory, and a location-only change touches nothing.
+
 ```bash
 uv run jsa refetch --dry-run   # what has changed upstream, without writing
-uv run jsa refetch             # reconcile postings not yet in the tracker
-uv run jsa refetch --all       # include tracked rows (flagged — the Sheet can't be fixed from here)
+uv run jsa refetch             # reconcile Apply postings not yet applied to
+uv run jsa refetch --all       # every stored row, regardless of decision or tracker state
+uv run jsa refetch --id 42     # one row, selected unconditionally
+```
+
+### Preparing application packets
+
+`jsa packet` builds the per-job application-packet directory — the
+deterministic first half of Step 4 (the resume tailoring itself is still to
+come). For each `Apply` posting not yet in the tracker it creates
+`~/Documents/Job Applications/{Company} - {Title}` with a fail-if-exists
+`mkdir` (an existing packet is skipped, never clobbered) and writes the
+captured job description inside as `job_posting.md`. Since `jsa track`
+currently runs at Apply time, `--id` builds the packet for a row that's
+already tracked.
+
+```bash
+uv run jsa packet --dry-run    # what would be created
+uv run jsa packet --id 42      # one packet, even if the row is already tracked
 ```
 
 ### Elevating to the tracker
 
 `jsa track` appends every `Apply` posting that isn't in the tracker yet to the
-Google Sheet, then flags the row `added_to_tracker = 1`. The flag is set **only**
+Google Sheet, then flags the row `added_to_tracker = 1`. Each row leads with
+the database id (column A), which is how `jsa refetch` matches Sheet rows back
+to postings. The flag is set **only**
 after the Sheets API confirms the append, so a failure leaves the posting in the
 backlog rather than silently dropping it; re-running never double-appends.
 The write shells out to the local [`gws`](https://github.com/googleworkspace/cli)
@@ -246,6 +283,8 @@ src/jsa/
   pipeline.py        Steps 1->2 orchestration
   manual.py          direct job add: one user-supplied URL through Step 2
   review.py          Step 3 deterministic review loop
+  refetch.py         reconcile stored postings against their (mutable) ATS record
+  packet.py          Step 4's deterministic head: create + seed the packet directory
   prompting.py       line-edited terminal input shared by the local commands
   tracker.py         Step 5 write to the Google Sheet application tracker
   cli.py             the `jsa` command-line entry point
