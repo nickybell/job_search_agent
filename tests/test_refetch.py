@@ -133,6 +133,25 @@ def test_diff_row_flags_a_rewritten_description():
     assert result.changed_fields == ["description"]
 
 
+def test_describe_renders_the_description_diff():
+    # The full JDs are multi-KB, so the report shows unified-diff hunks: what
+    # the employer edited, not two whole documents.
+    result = refetch.diff_row(
+        _row(jd="intro\nWe need a GTM enablement lead.\noutro"),
+        ATSDetail(
+            jd_markdown="intro\nWe need a sales enablement lead.\noutro",
+            location="Remote",
+            title=OLD_TITLE,
+        ),
+    )
+    out = refetch.describe(result)
+    assert "description diff:" in out
+    assert "-We need a GTM enablement lead." in out
+    assert "+We need a sales enablement lead." in out
+    # Unchanged context must not be re-rendered wholesale.
+    assert "---" not in out and "+++" not in out
+
+
 def test_diff_row_reports_no_change_when_the_ats_still_agrees():
     result = refetch.diff_row(
         _row(),
