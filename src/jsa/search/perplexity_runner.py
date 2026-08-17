@@ -1,8 +1,8 @@
-"""B-day search: Perplexity **Agent API** deep research (``xhigh`` preset).
+"""Perplexity **Agent API** deep research (``xhigh`` preset).
 
 The Agent API (``POST /v1/agent``) runs multi-step *agentic* research — chaining
 ``web_search`` calls with reasoning and aggregating across sources — which is the
-deep-research counterpart to the A-day Claude Deep Research runner. This replaces
+deep-research counterpart to the Claude Deep Research runner. This replaces
 the former Sonar ``sonar-pro`` chat-completions call, which was a single-pass
 search with no reasoning phase (fast, but not comparable in depth).
 
@@ -133,7 +133,7 @@ class _StreamState:
 
 
 def run_perplexity_search(prompt: str, api_key: str) -> str:
-    """Run the B-day Perplexity Agent API deep research; return the raw JSON output."""
+    """Run the Perplexity Agent API deep research; return the raw JSON output."""
     payload = {
         "preset": PRESET,
         "input": [{"role": "user", "content": prompt}],

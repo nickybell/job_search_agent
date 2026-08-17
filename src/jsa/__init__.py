@@ -2,7 +2,7 @@
 
 Package layout mirrors the PRD's numbered flow (Steps 1–5):
 
-- ``search/``  — Step 1: the A/B-alternating daily search runners.
+- ``search/``  — Step 1: the Claude and Perplexity daily search runners.
 - ``ats/``     — Step 2: full-JD capture from the posting's own ATS detail record.
 - ``db.py``    — the single Turso ``postings`` table and its idempotent insert.
 - ``pipeline.py`` — Steps 1→2 orchestration (search → insert → JD fetch).

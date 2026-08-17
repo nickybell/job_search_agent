@@ -48,24 +48,28 @@ class RunSummary:
         )
 
 
-def select_agent_for_date(now: datetime | None = None) -> str:
-    """Derive the A/B agent from day-of-year parity (even=claude, odd=perplexity)."""
+# The fixed weekly cadence for the daily cron: the ordered (agent, window-hours)
+# searches to run on each ET weekday, or absent on days we don't search. Python's
+# weekday(): Mon=0 .. Sun=6.
+#
+# Perplexity carries the recurring discovery load on a Mon/Wed/Fri cadence, with
+# per-day windows sized to tile the week without gaps: Monday reaches back across
+# the weekend (72h), Wednesday and Friday each cover the 48h since the prior run.
+# Friday additionally runs a weekly Claude Deep Research sweep over a full 168h
+# window, and Claude runs *first* so its broad weekly pass lands before the
+# incremental Perplexity one. The windows deliberately overlap, so a skipped fire
+# is recovered by the next run (and re-inserts no-op on canonical_url).
+CRON_SCHEDULE: dict[int, tuple[tuple[str, int], ...]] = {
+    0: (("perplexity", 72),),  # Monday
+    2: (("perplexity", 48),),  # Wednesday
+    4: (("claude", 168), ("perplexity", 48)),  # Friday — Claude first, then Perplexity
+}
+
+
+def schedule_for_date(now: datetime | None = None) -> tuple[tuple[str, int], ...]:
+    """The ordered (agent, window_hours) searches for `now`'s ET weekday; empty to skip."""
     now = now or datetime.now(EASTERN)
-    return "claude" if now.timetuple().tm_yday % 2 == 0 else "perplexity"
-
-
-# The fixed weekly cadence for the daily cron: the look-back window (in hours)
-# for each search day, or absent on days we don't search. Python's weekday():
-# Mon=0 .. Sun=6. Monday reaches back across the weekend (72h); Wednesday and
-# Friday each cover the 48h since the prior run. The windows deliberately
-# overlap, so a skipped fire is recovered by the next run (and re-inserts no-op).
-CRON_WINDOWS: dict[int, int] = {0: 72, 2: 48, 4: 48}  # Mon, Wed, Fri
-
-
-def window_for_date(now: datetime | None = None) -> int | None:
-    """Look-back window (hours) for the daily cron on `now`'s ET weekday, or None to skip."""
-    now = now or datetime.now(EASTERN)
-    return CRON_WINDOWS.get(now.weekday())
+    return CRON_SCHEDULE.get(now.weekday(), ())
 
 
 def _run_search(agent: str, prompt: str, config: Config) -> str:
@@ -73,7 +77,7 @@ def _run_search(agent: str, prompt: str, config: Config) -> str:
         return run_claude_search(prompt)
     if agent == "perplexity":
         if not config.perplexity_api_key:
-            raise RuntimeError("PERPLEXITY_API_KEY is not set (required for a B-day search).")
+            raise RuntimeError("PERPLEXITY_API_KEY is not set (required for a Perplexity search).")
         return run_perplexity_search(prompt, config.perplexity_api_key)
     raise ValueError(f"unknown agent: {agent!r}")
 

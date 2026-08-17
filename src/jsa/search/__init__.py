@@ -1,9 +1,10 @@
 """Step 1: the daily search runners.
 
-The search alternates by day — Claude Deep Research on even days, Perplexity Pro
-Search on odd days — but both read the same ``deep_research_prompt.md`` template
-and must return the same ``postings`` JSON contract, which ``parse.py`` validates
-through the shared pydantic models.
+Two runners — Claude Deep Research and Perplexity Agent API deep research — read
+the same ``deep_research_prompt.md`` template and must return the same
+``postings`` JSON contract, which ``parse.py`` validates through the shared
+pydantic models. The weekly cron cadence (which runner runs when) lives in
+``pipeline.CRON_SCHEDULE``.
 """
 
 from .parse import parse_search_output

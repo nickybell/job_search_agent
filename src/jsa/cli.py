@@ -22,7 +22,7 @@ import click
 from . import db, packet, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
-from .pipeline import run_pipeline, select_agent_for_date, window_for_date
+from .pipeline import run_pipeline, schedule_for_date
 from .refetch import describe, run_refetch
 from .review import run_review
 from .search.prompt import EASTERN
@@ -57,8 +57,9 @@ def init_db_command() -> None:
 @click.option(
     "--agent",
     type=click.Choice(["claude", "perplexity"]),
-    default=None,
-    help="Search agent. Defaults to the A/B choice for today (even day-of-year = claude).",
+    default="perplexity",
+    show_default=True,
+    help="Search agent to run.",
 )
 @click.option(
     "--window-hours",
@@ -67,50 +68,34 @@ def init_db_command() -> None:
     show_default=True,
     help="How far back to search, in hours.",
 )
-@click.option(
-    "--both",
-    is_flag=True,
-    default=False,
-    help="A/B trial: run BOTH agents over the same window (bypasses the "
-    "day-of-year A/B pick). Temporary — for the bounded A/B trial.",
-)
-def search_command(agent: str | None, window_hours: int, both: bool) -> None:
-    """Run the daily search and idempotently capture new postings (Steps 1–2)."""
+def search_command(agent: str, window_hours: int) -> None:
+    """Run one search and idempotently capture new postings (Steps 1–2)."""
     _configure_logging()
     config = load_config()
-    if both:
-        if agent:
-            raise click.UsageError("--both runs both agents; do not also pass --agent.")
-        # One shared `now` so both agents search the identical window and land
-        # under the same search_findings.run_date — the controlled A/B condition.
-        now = datetime.now(EASTERN)
-        for a in ("claude", "perplexity"):
-            summary = run_pipeline(a, window_hours, config, now=now)
-            click.echo(str(summary))
-        return
-    agent = agent or select_agent_for_date()
     summary = run_pipeline(agent, window_hours, config)
     click.echo(str(summary))
 
 
 @main.command("cron")
 def cron_command() -> None:
-    """Daily-cron entrypoint: self-gate to Mon/Wed/Fri with a weekday-sized window.
+    """Daily-cron entrypoint: self-gate to the weekly search schedule.
 
     Fly's scheduler only fires a fuzzy ``daily`` interval (no weekday selector,
-    no per-run args), so this runs every morning and gates itself: it searches
-    only on Mon (72h) / Wed (48h) / Fri (48h) and exits quietly on other days.
-    It runs BOTH agents over the same window — the current A/B trial condition.
+    no per-run args), so this runs every morning and gates itself against
+    ``CRON_SCHEDULE``: Perplexity on Mon (72h) / Wed (48h) / Fri (48h), plus a
+    weekly Claude Deep Research sweep (168h) on Friday that runs first. It exits
+    quietly on days with no scheduled search. One shared ``now`` per day so every
+    search that day lands under the same ``run_date``.
     """
     _configure_logging()
     config = load_config()
     now = datetime.now(EASTERN)
-    window_hours = window_for_date(now)
-    if window_hours is None:
+    runs = schedule_for_date(now)
+    if not runs:
         click.echo(f"{now.date().isoformat()} ({now:%A}): no search scheduled today.")
         return
-    for a in ("claude", "perplexity"):
-        summary = run_pipeline(a, window_hours, config, now=now)
+    for agent, window_hours in runs:
+        summary = run_pipeline(agent, window_hours, config, now=now)
         click.echo(str(summary))
 
 

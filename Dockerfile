@@ -1,9 +1,10 @@
 # Image for the headless Steps 1-2 cron (daily search + idempotent capture).
 #
-# The A-day search uses the Claude Agent SDK, which spawns the Claude Code CLI
-# as a subprocess, so the image carries Node.js + @anthropic-ai/claude-code in
-# addition to Python. The B-day (Perplexity) path is pure HTTP and needs only
-# Python; both agents share this one image and the day-of-year parity picks one.
+# The Claude Deep Research search uses the Claude Agent SDK, which spawns the
+# Claude Code CLI as a subprocess, so the image carries Node.js +
+# @anthropic-ai/claude-code in addition to Python. The Perplexity path is pure
+# HTTP and needs only Python; both agents share this one image, and
+# pipeline.CRON_SCHEDULE decides which run(s) fire on a given day.
 FROM python:3.14-slim-bookworm
 
 ENV TZ=America/New_York \
@@ -46,6 +47,7 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # One run per machine start; the scheduled machine stops when the command exits.
-# `jsa cron` self-gates to Mon/Wed/Fri with a weekday-sized window (see cli.py),
-# so the Fly machine can wake on a plain fuzzy `--schedule daily`.
+# `jsa cron` self-gates against pipeline.CRON_SCHEDULE (Perplexity Mon/Wed/Fri
+# plus a weekly Claude sweep on Fridays; see pipeline.py), so the Fly machine
+# can wake on a plain fuzzy `--schedule daily`.
 ENTRYPOINT ["uv", "run", "--no-dev", "jsa", "cron"]
