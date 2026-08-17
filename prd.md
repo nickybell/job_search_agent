@@ -263,14 +263,23 @@ gws sheets spreadsheets values append \
 
 ### Search Prompt Updates from "Ground Truth"
 
-<!--
-**Data Sources:**
+The `fit_feedback` collected in Step 3 is the ground truth that refines the Step 1 search prompt (`deep_research_prompt.md`). Today this is a **periodic, human-run refinement pass**, not yet the automated daily cron (that mechanism is still deferred -- see `TODO.md`): the operator pulls every decided posting and its feedback and translates the accumulated signal into prompt edits under fixed rules, so the prompt sharpens toward Nicky's real preferences without the agent silently rewriting its own instructions.
 
-You have access to two data sources that can assist you in making your determinations about job postings to which Nicky should consider applying.
+**Translation rules (what feedback may change, and how):**
 
-1. `base_resume.docx`: This is the generalized version of Nicky's resume that lays out his background and skills. A post worth applying to will fit Nicky's career narrative and/or skill set.
-2. JD database: as part of this work, you will create a SQLite database to hold job descriptions that you identify or that Nicky provides directly. You will regularly get feedback from Nicky on the fit of the job descriptions, which will allow you to fine-tune your search over time as the "ground truth" becomes more refined.
--->
+- **Explicit directives become hard exclusions.** When the feedback literally instructs a search change ("exclude Developer Relations roles"), especially when it repeats, encode it as a title-level hard exclusion.
+- **Objective, incontrovertibly-verifiable skips become hard filters.** When a job is skipped for something readable straight off the posting (a published salary range below the floor), encode it as a non-negotiable filter.
+- **Repeated skip patterns become negative signals or sharpened target language -- never new hard exclusions.** Recurring "borrows enablement vocabulary but is really X" patterns (IT/security, data governance, consulting/services delivery, sales/expansion, partnerships, CX/support-ops), "too technical for a non-SWE" patterns, and "functional enablement needing domain experience Nicky lacks" patterns steer *effort allocation* only; the borderline call stays with Step 3. This preserves the prompt's recall-first stance for fit.
+- **One-off judgment calls stay out of the prompt.** A single role-specific critique or a "this vertical bores me" reaction is Step 3 working as designed, not a search defect, and is not encoded.
+- The output JSON contract, the `{{SEARCH_WINDOW}}` placeholder, and the liveness / ATS-index machinery are never touched by this loop -- only the role-fit criteria are.
+
+**Refinement round 2026-08-16 (first pass, 30 decided postings).** Applied to `deep_research_prompt.md`:
+
+- **Salary floor lowered $165,000 -> $150,000, strict.** Nicky's stated minimum is $150k (Mural skip). The floor still excludes a posting only when its *stated* top-of-range is below it, but now does so even when the posting hints at flexibility or equity/bonus upside; unstated comp is still included.
+- **Developer-facing roles hard-excluded.** Nicky twice directed excluding DevRel ("too technical... never been a SWE"). Developer Relations / Developer Advocate / Developer Evangelist / Developer Education titles are now a title-level exclusion; "Developer Education" and DevRel/Advocacy were removed from the adjacent-target list, and the DevRel job boards dropped from Sources.
+- **New negative signals (deprioritize, never exclude):** enablement vocabulary fronting IT-security / data governance / consulting-services delivery / sales-expansion / partnerships / CX-support-operations; engineering-grade technical depth ("solutions architect required," infra/DBMS curriculum); functional enablement gated on domain experience Nicky lacks (marketing, legal-ops); executive scope above a functional Head/VP (~15+ years, org-wide/C-suite mandates); third-party-vendor certification training. The "success measured in expansion/upsell" signal was sharpened to name "Enterprise Success"-style account-growth roles.
+- **Company-type filter added (product companies only).** After Nicky confirmed a company's nature is discernible from the JD's "who we are" front matter, employers whose core business is consulting / professional-services / staffing or investing (a holding company / PE firm / acquirer without its own product, e.g. Cordance) are now a hard company-level filter, mirroring Industry -- with an ambiguity-include escape so genuine product-with-services blends still surface.
+- **Curriculum/teaching reframed toward hands-on enablement.** Nicky clarified his target is hands-on, in-the-trenches work *with* customers (a success/retention function), not producing training material "in the Ivory Tower." Direct customer-adoption work is now the lead positive signal; "design and build curriculum" is conditioned on serving that charter rather than standing alone as strong-fit; content-production / teaching-as-the-whole-job is a new negative signal; and the pure-content adjacent targets (Instructional Design, Technical Curriculum Developer) were dropped. Kept as a strong deprioritization rather than a hard exclusion because hands-on-ness is a JD-body spectrum, not a title-level fact -- consistent with the recall-first stance.
 
 ## Architecture
 
