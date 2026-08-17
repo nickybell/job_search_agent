@@ -13,21 +13,28 @@ This is that path: re-resolve the ATS record and apply the same rule the insert
 uses -- the ATS-canonical title wins, and ``title_slug`` is re-derived from it
 so the Step 4 packet naming stays consistent.
 
-Two things it will not do. A failed fetch leaves the row completely untouched
-rather than overwriting a good description with nothing -- the same
-degrade-don't-destroy stance the pipeline takes, applied in the direction that
-matters here. And a row already written to the tracker is flagged when it has
-drifted, because the Sheet copy cannot be corrected from this side: the agent
-only ever appends to it.
+One constraint is inherited from the pipeline: a failed fetch leaves the row
+completely untouched rather than overwriting a good description with nothing
+-- the same degrade-don't-destroy stance, applied in the direction that
+matters here.
 
 Scope (decided 2026-08-16): only postings where drift could still change what
-Nicky does next -- ``decision = 'Apply'`` rows minus those already applied to.
-"Already applied" lives only in the Sheet's Date Applied column, so the scope
-check reads the tracker via ``tracker.read_applied_dates``, the one sanctioned
-read of the otherwise write-only Sheet (it mirrors nothing into the database
-and no write depends on it). If that lookup fails, the run fails loudly rather
-than guessing at scope. ``--all`` widens to every stored row and skips the
-lookup, as does an explicit ``--id``.
+Nicky does next -- ``decision = 'Apply'`` rows that are *either* absent from
+the tracker Sheet *or* present with a blank Date Applied. That is an OR: being
+in the tracker does not exempt a job that has not actually been applied to.
+Once an application is out the door the row is skipped and its Sheet copy
+becomes a frozen record of what was submitted. If the Sheet index read fails
+in this default scope, the run fails loudly rather than guessing.
+
+The Sheet relationship follows the 2026-08-16 reframing (see ``tracker``): the
+database is the source of truth for posting data; the tracker is its
+human-readable projection plus the user's workspace. So when a title
+correction lands on a row that sits in the Sheet unapplied, the projection
+follows -- ``tracker.update_title`` refreshes that one cell, DB first, Sheet
+second, and a failed Sheet write degrades to a flagged hand-fix rather than
+blocking the reconciliation. Under ``--id``/``--all`` the rows are selected
+unconditionally, so the index read is best-effort there: it only enables the
+refresh, and its failure downgrades to the flag.
 """
 
 from __future__ import annotations
@@ -40,7 +47,7 @@ import httpx
 from . import db
 from .ats import fetch_detail, resolve_ats_url
 from .config import Config
-from .tracker import read_applied_dates, spreadsheet_id
+from .tracker import TrackedRow, TrackerError, read_tracker_index, spreadsheet_id, update_title
 
 log = logging.getLogger(__name__)
 
@@ -57,10 +64,23 @@ class RowResult:
     changed_fields: list[str] = field(default_factory=list)
     unresolved: bool = False
     error: str | None = None
+    sheet_row: int | None = None  # Sheet row to refresh: tracked & unapplied only
+    sheet_updated: bool = False
+    sheet_error: str | None = None
 
     @property
     def changed(self) -> bool:
         return bool(self.changed_fields)
+
+    @property
+    def sheet_refresh_pending(self) -> bool:
+        """A title change mapped to an unapplied Sheet row, not (yet) written."""
+        return (
+            "title" in self.changed_fields
+            and self.sheet_row is not None
+            and not self.sheet_updated
+            and self.sheet_error is None
+        )
 
 
 @dataclass
@@ -72,6 +92,7 @@ class RefetchSummary:
     unchanged: int = 0
     unresolved: int = 0
     failed: int = 0
+    tracker_updated: int = 0
     stale_in_tracker: int = 0
     skipped_applied: int = 0
 
@@ -79,6 +100,7 @@ class RefetchSummary:
         return (
             f"examined={self.examined} changed={self.changed} unchanged={self.unchanged} "
             f"unresolved={self.unresolved} failed={self.failed} "
+            f"tracker_updated={self.tracker_updated} "
             f"stale_in_tracker={self.stale_in_tracker} skipped_applied={self.skipped_applied}"
         )
 
@@ -114,10 +136,12 @@ def run_refetch(
 ) -> tuple[RefetchSummary, list[RowResult]]:
     """Re-read each selected posting's ATS record and reconcile the stored row.
 
-    The default scope is Apply rows not yet applied to, per the tracker Sheet's
-    Date Applied column — raising ``tracker.TrackerError`` if that lookup fails,
-    since silently refetching everything (or nothing) would defeat the scoping.
-    An explicit ``posting_id`` or ``include_all`` bypasses the lookup entirely.
+    The default scope is Apply rows either absent from the tracker Sheet or
+    present without a Date Applied — raising ``tracker.TrackerError`` if that
+    index read fails, since silently refetching everything (or nothing) would
+    defeat the scoping. ``posting_id`` and ``include_all`` select rows
+    unconditionally; the index is then read best-effort, purely to refresh the
+    Sheet Title of a corrected row.
     """
     summary = RefetchSummary()
     results: list[RowResult] = []
@@ -126,17 +150,29 @@ def run_refetch(
     db.init_db(client)
     try:
         rows = db.rows_for_refetch(client, posting_id, include_all=include_all)
-        if posting_id is None and not include_all and rows:
-            applied = read_applied_dates(spreadsheet_id())
-            kept = [r for r in rows if not applied.get(int(r[0]), "")]
-            summary.skipped_applied = len(rows) - len(kept)
-            rows = kept
+        index: dict[int, TrackedRow] = {}
+        if rows:
+            if posting_id is None and not include_all:
+                index = read_tracker_index(spreadsheet_id())
+                kept = [r for r in rows if not _already_applied(index.get(int(r[0])))]
+                summary.skipped_applied = len(rows) - len(kept)
+                rows = kept
+            else:
+                try:
+                    index = read_tracker_index(spreadsheet_id())
+                except TrackerError as exc:
+                    log.warning(
+                        "tracker index unavailable; Sheet titles will not be refreshed: %s",
+                        exc,
+                    )
         summary.examined = len(rows)
         if not rows:
             return summary, results
         with httpx.Client(follow_redirects=True) as http:
             for row in rows:
-                result = _refetch_one(client, row, http, dry_run=dry_run)
+                tracked = index.get(int(row[0]))
+                sheet_row = tracked.row_number if tracked and not tracked.date_applied else None
+                result = _refetch_one(client, row, http, dry_run=dry_run, sheet_row=sheet_row)
                 results.append(result)
                 if result.error:
                     summary.failed += 1
@@ -144,7 +180,9 @@ def run_refetch(
                     summary.unresolved += 1
                 elif result.changed:
                     summary.changed += 1
-                    if result.already_tracked:
+                    if result.sheet_updated or (dry_run and result.sheet_refresh_pending):
+                        summary.tracker_updated += 1
+                    elif "title" in result.changed_fields and result.already_tracked:
                         summary.stale_in_tracker += 1
                 else:
                     summary.unchanged += 1
@@ -153,7 +191,19 @@ def run_refetch(
     return summary, results
 
 
-def _refetch_one(client, row: tuple, http: httpx.Client, *, dry_run: bool) -> RowResult:
+def _already_applied(tracked: TrackedRow | None) -> bool:
+    """True only for rows BOTH present in the Sheet AND bearing a Date Applied.
+
+    The scope spec is an OR — absent from the Sheet, *or* present with a blank
+    Date Applied, keeps a row eligible — so the skip is its negation: presence
+    and a date, together.
+    """
+    return tracked is not None and bool(tracked.date_applied)
+
+
+def _refetch_one(
+    client, row: tuple, http: httpx.Client, *, dry_run: bool, sheet_row: int | None = None
+) -> RowResult:
     posting_id, url, title, _location, tracked = row
     resolved = resolve_ats_url(url)
     if resolved is None:
@@ -179,6 +229,7 @@ def _refetch_one(client, row: tuple, http: httpx.Client, *, dry_run: bool) -> Ro
         )
 
     result = diff_row(row, detail)
+    result.sheet_row = sheet_row
     if dry_run:
         return result
 
@@ -193,6 +244,17 @@ def _refetch_one(client, row: tuple, http: httpx.Client, *, dry_run: bool) -> Ro
         location=detail.location,
         title=detail.title or None,
     )
+    # DB first, Sheet second: the tracker is a projection of the row just
+    # corrected, so refresh its Title cell when the row sits there unapplied.
+    # A failed Sheet write must not undo or block the reconciliation — it
+    # degrades to the flagged hand-fix in describe().
+    if "title" in result.changed_fields and sheet_row is not None:
+        try:
+            update_title(spreadsheet_id(), sheet_row, result.title_after)
+        except TrackerError as exc:
+            result.sheet_error = str(exc)
+        else:
+            result.sheet_updated = True
     return result
 
 
@@ -208,9 +270,18 @@ def describe(result: RowResult) -> str:
     if "title" in result.changed_fields:
         lines.append(f"      title: {result.title_before!r} → {result.title_after!r}")
         lines.append("      (title_slug re-derived to match)")
-    if result.already_tracked:
-        lines.append(
-            "      NOTE: already in the tracker Sheet, which this cannot correct — "
-            "the agent only appends. Fix that row by hand."
-        )
+        if result.sheet_updated:
+            lines.append("      tracker row Title refreshed to match")
+        elif result.sheet_error:
+            lines.append(
+                "      NOTE: the tracker row's Title could not be refreshed — fix it "
+                f"by hand. ({result.sheet_error})"
+            )
+        elif result.sheet_refresh_pending:
+            lines.append("      tracker row Title would be refreshed to match")
+        elif result.already_tracked:
+            lines.append(
+                "      NOTE: already in the tracker Sheet, but its row could not be "
+                "matched (or is already applied to) — check that row by hand."
+            )
     return "\n".join(lines)

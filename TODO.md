@@ -49,11 +49,18 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   untracked; `--id` waives the tracker condition (the interim track-on-Apply
   trigger tracks rows before packets exist) but never the Apply one.
 - **`jsa refetch` rescoped** to postings where drift could still change an
-  action: `Apply` rows minus those with a `Date Applied` in the tracker Sheet.
-  That required the Sheet's first ever agent read — an explicit, user-decided
-  relaxation of the absolute "never reads back" rule, recorded in `prd.md`
-  (Application Tracker): read-only, scope-only, nothing mirrored, no write
-  depends on it. A failed lookup aborts; `--all`/`--id` skip the lookup.
+  action: `Apply` rows that are absent from the tracker Sheet OR have no
+  `Date Applied` there. A failed index read aborts the default scope;
+  `--id`/`--all` select unconditionally, so for them the read is best-effort.
+- **The Sheet relationship reframed (superseding "write-only"/"append-only").**
+  Nicky's articulation: two concepts had been conflated — where authority
+  lives vs. which operations are permitted. The principle is that the database
+  is the source of truth for posting data and the tracker is its human-readable
+  projection plus his workspace columns (`Date Applied`, `Status`, which only
+  he writes). Consequences implemented: refetch reads the Sheet index to scope
+  itself, and **propagates a corrected Title to the tracker row** when the job
+  sits there unapplied (DB first, Sheet second; a failed Sheet write degrades
+  to a flagged hand-fix). Recorded in `prd.md` (Application Tracker).
 - **Tracker sheet gained an `ID` column** (now A:H, ID first) so Sheet rows
   join back to `postings.id` without URL comparison. The live sheet was
   restructured in place: column inserted, header formatted, existing rows

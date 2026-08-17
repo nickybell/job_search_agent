@@ -229,12 +229,13 @@ def test_missing_gws_binary_raises_before_touching_any_row(config, client, monke
     assert tracked_flags(client) == [0]
 
 
-# --- read_applied_dates (refetch's scope lookup) ---------------------------
+# --- read_tracker_index (refetch's scope + propagation index) --------------
 
 
-def test_read_applied_dates_maps_ids_and_treats_short_rows_as_unapplied(tmp_path):
+def test_read_tracker_index_maps_ids_to_rows_and_short_rows_read_as_unapplied(tmp_path):
     # The Sheets API truncates trailing blank cells, so a not-yet-applied row
     # usually arrives with no Date Applied cell at all; that must read as "".
+    # Row numbers are 1-based Sheet rows (header is row 1).
     response = {
         "values": [
             ["ID", "Company", "Title", "URL", "Date Posted", "Date Added", "Date Applied"],
@@ -243,12 +244,15 @@ def test_read_applied_dates_maps_ids_and_treats_short_rows_as_unapplied(tmp_path
         ]
     }
     _write_stub(tmp_path, f"print(json.dumps({response!r}))")
-    assert tracker.read_applied_dates("sheet-under-test") == {3: "", 5: "2026-08-12"}
+    assert tracker.read_tracker_index("sheet-under-test") == {
+        3: tracker.TrackedRow(row_number=2, date_applied=""),
+        5: tracker.TrackedRow(row_number=3, date_applied="2026-08-12"),
+    }
 
 
-def test_read_applied_dates_skips_rows_without_a_numeric_id(tmp_path):
-    # A row typed into the Sheet by hand has no DB row to scope, and the
-    # header must never be mistaken for data.
+def test_read_tracker_index_skips_non_numeric_ids_but_keeps_row_numbering(tmp_path):
+    # A row typed into the Sheet by hand has no DB row to index, but it still
+    # occupies a Sheet row — the rows after it must not shift.
     response = {
         "values": [
             ["ID", "Company", "Title", "URL", "Date Posted", "Date Added", "Date Applied"],
@@ -257,10 +261,33 @@ def test_read_applied_dates_skips_rows_without_a_numeric_id(tmp_path):
         ]
     }
     _write_stub(tmp_path, f"print(json.dumps({response!r}))")
-    assert tracker.read_applied_dates("sheet-under-test") == {4: ""}
+    assert tracker.read_tracker_index("sheet-under-test") == {
+        4: tracker.TrackedRow(row_number=3, date_applied="")
+    }
 
 
-def test_read_applied_dates_raises_on_a_failed_gws_call(tmp_path):
+def test_read_tracker_index_raises_on_a_failed_gws_call(tmp_path):
     _write_stub(tmp_path, "sys.exit(2)")
     with pytest.raises(tracker.TrackerError, match="gws auth login"):
-        tracker.read_applied_dates("sheet-under-test")
+        tracker.read_tracker_index("sheet-under-test")
+
+
+# --- update_title (refetch's projection refresh) ---------------------------
+
+
+def test_update_title_targets_the_single_title_cell(tmp_path):
+    log = _write_stub(tmp_path, 'print(json.dumps({"updatedCells": 1}))')
+    tracker.update_title("sheet-under-test", 5, "New Title")
+    argv = json.loads(log.read_text().splitlines()[0])
+    assert argv[:4] == ["sheets", "spreadsheets", "values", "update"]
+    params = json.loads(argv[5])
+    # Exactly one cell in the Title column — this write must never be able to
+    # reach the user's columns (Date Applied, Status).
+    assert params["range"] == "Applications!C5"
+    assert json.loads(argv[7]) == {"values": [["New Title"]]}
+
+
+def test_update_title_raises_when_no_cell_is_confirmed(tmp_path):
+    _write_stub(tmp_path, "print(json.dumps({}))")
+    with pytest.raises(tracker.TrackerError, match="no updated cell"):
+        tracker.update_title("sheet-under-test", 5, "New Title")

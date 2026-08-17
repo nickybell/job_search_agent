@@ -4,7 +4,7 @@ One hosted libSQL database backs both the headless cloud cron (Steps 1–2) and
 the local review session (Step 3); this module is the only place that touches
 it. The table holds search output, the canonical-URL idempotency key, the
 full job description, and the user's fit feedback — deliberately no application
-state (that lives write-only in the Google Sheet, per the PRD).
+state (that lives in the Google Sheet tracker's user columns, per the PRD).
 
 Connections go through ``turso_serverless``, Turso's pure-Python DB-API 2.0
 driver that speaks Hrana over HTTP (Turso's managed platform serves HTTP only;
