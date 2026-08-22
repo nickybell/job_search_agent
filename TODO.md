@@ -178,7 +178,10 @@ not caught up yet — the checklist below is the gap.
   watermark or ground-truth reference inside `deep_research_prompt.md`** —
   oscillation across runs is accepted; provenance lives in PR history. The
   refiner treats explicit feedback AND manual adds (recall set) AND implicit
-  patterns mined from stored Apply/Skip JDs as first-class inputs.
+  patterns mined from stored Apply/Skip JDs as first-class inputs. **No
+  sentinels and no pinning test** (clarified 2026-08-22): the human PR review
+  is the protection for the contract/window/liveness machinery; the
+  do-not-touch list stays instructional, in `refine_search_prompt.md`.
 
 Implementation checklist:
 
@@ -196,21 +199,18 @@ Implementation checklist:
   (`record_decision`, `set_decision`, the manual-add INSERT), plus the
   `prompt_refinement_runs` table. Existing decided rows stay `NULL` =
   incorporated by the manual rounds; re-deciding refreshes the timestamp.
-- [ ] **Sentinels + pinning test**: mark the fixed regions of
-  `deep_research_prompt.md` (output contract, `{{SEARCH_WINDOW}}`, liveness +
-  ATS table) and add the pytest asserting placeholder/contract/table/sentinel
-  invariants, so a bad refinement edit fails the suite before the PR burns
-  review time.
 - [ ] **Write `refine_search_prompt.md`**: port the interactive refinement
   prompt (2026-08-16/17 rounds) plus the upgrades — the manual-adds recall
   pass (unsupported-ATS misses accumulate toward the ATS-table escape hatch,
   not prompt edits), JD pattern mining, incremental scope fed by the harness,
-  PR-body deliverables replacing AskUserQuestion, minimal-diff stance.
+  PR-body deliverables replacing AskUserQuestion, minimal-diff stance. Keep
+  the do-not-touch guardrails (contract, `{{SEARCH_WINDOW}}`, liveness + ATS
+  table) instructional — the PR review is the gate; no sentinels, no pinning
+  test.
 - [ ] **The GitHub Actions workflow**: weekly schedule; repo secrets for
   Turso + Anthropic (set the *rotated* keys — see the credential-rotation
-  item below — never the leaked ones); run the refiner, run pytest, open the
-  PR via `gh`; record the `prompt_refinement_runs` row. Pick the day/hour at
-  setup.
+  item below — never the leaked ones); run the refiner, open the PR via
+  `gh`; record the `prompt_refinement_runs` row. Pick the day/hour at setup.
 
 ## What needs you (setup before the first run)
 
@@ -308,9 +308,9 @@ Implementation checklist:
 - [X] **Search Prompt Updates from "Ground Truth"** — *section filled
   2026-08-22.* The mechanism is now fully designed in `prd.md`: an automated
   weekly PR-gated loop (GitHub Actions, `claude-opus-4-8` at `high`),
-  incremental via `decided_at` / `prompt_refinement_runs`, with sentinels +
-  a pinning test as the mechanical guardrails that made automation
-  acceptable. Implementation is the 2026-08-22 checklist above.
+  incremental via `decided_at` / `prompt_refinement_runs`, with the human PR
+  review as the guardrail (no sentinels, no pinning test — by choice).
+  Implementation is the 2026-08-22 checklist above.
   - Both fit-criteria initially deferred from this round were **resolved 2026-08-16**
     after Nicky confirmed they're discernible from the JD's "who we are" front
     matter: a **company-type filter** (product companies only; consulting /

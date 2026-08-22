@@ -1,5 +1,6 @@
 # --- Personal data (never published) ---
 base_resume.docx
+resume_templates/
 
 # --- Secrets ---
 .env
