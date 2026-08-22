@@ -22,7 +22,6 @@ jsa = "jsa.cli:main"
 [dependency-groups]
 dev = [
     "ruff>=0.6",
-    "pytest>=8.0",
 ]
 
 [build-system]
@@ -39,10 +38,3 @@ src = ["src"]
 [tool.ruff.lint]
 # pyflakes (F), pycodestyle (E/W), isort (I), pyupgrade (UP), bugbear (B)
 select = ["E", "W", "F", "I", "UP", "B"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-# The suite is deliberately I/O-free apart from a throwaway `file:` SQLite DB
-# and a stub `gws` binary, so it never touches the hosted Turso database or a
-# real Google Sheet.
-addopts = "-q"
