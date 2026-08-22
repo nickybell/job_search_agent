@@ -396,6 +396,4 @@ src/jsa/
   prompting.py       line-edited terminal input shared by the local commands
   tracker.py         Step 5 write to the Google Sheet application tracker
   cli.py             the `jsa` command-line entry point
-tests/               hermetic pytest suite (throwaway SQLite; stubbed ATS, gws,
-                     soffice, and tailoring model)
 ```
