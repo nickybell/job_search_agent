@@ -148,6 +148,70 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   function — not needed for the app to work, filed for the DevOps-practice
   value. See the "Why Step 4 is local" note in `prd.md`.
 
+## Added 2026-08-22 (resume templates + automated ground-truth loop)
+
+Decisions from the 2026-08-22 design session, recorded in `prd.md` (Resume
+Revisions; Search Prompt Updates from "Ground Truth"; Database). The code has
+not caught up yet — the checklist below is the gap.
+
+- **[Resolved 2026-08-22] Base model: a curated template library that expands
+  outward.** `resume_templates/` (gitignored), one maintained `.docx` per role
+  family, formalizing Nicky's nearest-fit practice without copy-of-copy drift.
+  The model picks the template per job (pick + rationale recorded in the
+  changelog); when no family fits, it starts from the *nearest* template and
+  the tailored result is saved back as the new family's template, flagged for
+  a curation scrub (it began life tailored to one company). Good
+  hand-refinements are folded back into templates by Nicky — explicit
+  curation, not copy lineage.
+- **[Resolved 2026-08-22] Open Career Format: rejected.** Its one good idea
+  (career facts separated from rendered documents) isn't worth owning a
+  JSON→docx rendering pipeline for a v0.3 spec; the structured patch exists
+  precisely to avoid that layer. The lighter accomplishments-bank variant was
+  also declined — tailoring context is the chosen template + the JD, nothing
+  more.
+- **[Resolved 2026-08-22] The refinement loop is automated, PR-gated, and
+  incremental via the database — and the prompt stays standalone.** Weekly
+  cron (GitHub Actions), refiner pinned `claude-opus-4-8` at `high` effort,
+  output is always a PR (with prd.md synced in the same PR), never a direct
+  commit. Scope per run is only ground truth newer than the last run
+  (`decided_at` > last `prompt_refinement_runs` row). Hard preference: **no
+  watermark or ground-truth reference inside `deep_research_prompt.md`** —
+  oscillation across runs is accepted; provenance lives in PR history. The
+  refiner treats explicit feedback AND manual adds (recall set) AND implicit
+  patterns mined from stored Apply/Skip JDs as first-class inputs.
+
+Implementation checklist:
+
+- [ ] **Seed `resume_templates/`** from the nine tailored resumes in
+  `~/Documents/Job Applications/` — pick the best 2–4 by role family, scrub
+  company-specific phrasing, name by family slug. Needs Nicky's judgment;
+  agent-assisted consolidation is a good first pass.
+- [ ] **Implement the template library in `jsa generate`**: prompt carries
+  every template's numbered text; output contract gains `base` (template
+  slug) and optional `new_family`; new-family results are saved back into the
+  library and flagged in the changelog; `JSA_RESUME_TEMPLATES_DIR` override;
+  update `tailoring_prompt.md`'s slots and contract; tests.
+- [ ] **Schema migration**: add `postings.decided_at` (plain `ALTER TABLE ADD
+  COLUMN` — no CHECK rebuild needed) set on every decision write
+  (`record_decision`, `set_decision`, the manual-add INSERT), plus the
+  `prompt_refinement_runs` table. Existing decided rows stay `NULL` =
+  incorporated by the manual rounds; re-deciding refreshes the timestamp.
+- [ ] **Sentinels + pinning test**: mark the fixed regions of
+  `deep_research_prompt.md` (output contract, `{{SEARCH_WINDOW}}`, liveness +
+  ATS table) and add the pytest asserting placeholder/contract/table/sentinel
+  invariants, so a bad refinement edit fails the suite before the PR burns
+  review time.
+- [ ] **Write `refine_search_prompt.md`**: port the interactive refinement
+  prompt (2026-08-16/17 rounds) plus the upgrades — the manual-adds recall
+  pass (unsupported-ATS misses accumulate toward the ATS-table escape hatch,
+  not prompt edits), JD pattern mining, incremental scope fed by the harness,
+  PR-body deliverables replacing AskUserQuestion, minimal-diff stance.
+- [ ] **The GitHub Actions workflow**: weekly schedule; repo secrets for
+  Turso + Anthropic (set the *rotated* keys — see the credential-rotation
+  item below — never the leaked ones); run the refiner, run pytest, open the
+  PR via `gh`; record the `prompt_refinement_runs` row. Pick the day/hour at
+  setup.
+
 ## What needs you (setup before the first run)
 
 - [X] **First live searches.** Run `uv run jsa search --agent claude` and
@@ -241,12 +305,12 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   output contract, which is load-bearing and must survive the rewrite. The
   real instructions are TK.
 
-- [~] **Search Prompt Updates from "Ground Truth"** — the *manual* refinement pass
-  (translation rules + the first 2026-08-16 round) is now documented in `prd.md`.
-  **Still open:** automating it on the daily cron. The mechanism stays undesigned
-  because an agent editing its own search prompt needs guardrails so the
-  recall-first stance and the JSON-contract / `{{SEARCH_WINDOW}}` / liveness
-  machinery stay untouched — for now the pass is run by hand.
+- [X] **Search Prompt Updates from "Ground Truth"** — *section filled
+  2026-08-22.* The mechanism is now fully designed in `prd.md`: an automated
+  weekly PR-gated loop (GitHub Actions, `claude-opus-4-8` at `high`),
+  incremental via `decided_at` / `prompt_refinement_runs`, with sentinels +
+  a pinning test as the mechanical guardrails that made automation
+  acceptable. Implementation is the 2026-08-22 checklist above.
   - Both fit-criteria initially deferred from this round were **resolved 2026-08-16**
     after Nicky confirmed they're discernible from the JD's "who we are" front
     matter: a **company-type filter** (product companies only; consulting /
