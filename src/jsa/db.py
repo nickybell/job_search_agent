@@ -48,6 +48,7 @@ _POSTINGS_COLUMNS = """
     first_seen_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     decision           TEXT    CHECK (decision IN ('Apply', 'Skip')),
     fit_feedback       TEXT,
+    decided_at         TEXT,
     added_to_tracker   INTEGER NOT NULL DEFAULT 0
 """
 
@@ -56,7 +57,7 @@ _POSTINGS_COLUMNS = """
 _POSTINGS_COLUMN_NAMES = (
     "id, company, title, url, date_posted, canonical_url, normalized_company, "
     "title_slug, jd_markdown, location, search_agent, first_seen_at, decision, "
-    "fit_feedback, added_to_tracker"
+    "fit_feedback, decided_at, added_to_tracker"
 )
 
 _SCHEMA = f"CREATE TABLE IF NOT EXISTS postings ({_POSTINGS_COLUMNS})"
@@ -76,6 +77,20 @@ CREATE TABLE IF NOT EXISTS search_findings (
     rank          INTEGER,
     found_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (run_date, agent, canonical_url)
+)
+"""
+
+# One row per prompt-refinement run that considered ground truth (prd.md,
+# Search Prompt Updates). MAX(run_at) is the next run's scope cutoff, which is
+# what keeps the loop incremental without a watermark in the prompt itself.
+# Recording at run time (never PR-merge time) is deliberate: a rejected
+# translation still *considered* its rows, and re-deciding a posting is how it
+# re-enters scope.
+_REFINEMENT_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS prompt_refinement_runs (
+    run_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    considered INTEGER NOT NULL,
+    changed    INTEGER NOT NULL DEFAULT 0
 )
 """
 
@@ -140,22 +155,32 @@ def init_db(client: Connection) -> None:
     migrate_postings_schema(client)
     client.execute(_SCHEMA)
     client.execute(_FINDINGS_SCHEMA)
+    client.execute(_REFINEMENT_RUNS_SCHEMA)
 
 
 def migrate_postings_schema(client: Connection) -> bool:
-    """Widen the legacy ``search_agent`` CHECK to admit ``'manual'``.
+    """Bring an existing ``postings`` table up to the current schema.
 
-    Databases created before the direct job-add path constrain ``search_agent``
-    to the two search agents, which rejects a hand-added row. SQLite cannot
-    ALTER a CHECK constraint, so this performs the standard table rebuild:
-    create the new table, copy, swap names, drop the old one.
+    Two migrations, applied in order:
+
+    1. **Add ``decided_at``** (2026-08-22) — a plain ``ALTER TABLE ADD COLUMN``,
+       run *before* the rebuild below so the rebuild's named copy list (which
+       includes the column) always finds it in the source table. Rows decided
+       before the column existed keep ``NULL``, meaning "already incorporated
+       by the manual refinement rounds" (prd.md); re-deciding a row fills it.
+    2. **Widen the legacy ``search_agent`` CHECK to admit ``'manual'``.**
+       Databases created before the direct job-add path constrain
+       ``search_agent`` to the two search agents, which rejects a hand-added
+       row. SQLite cannot ALTER a CHECK constraint, so this performs the
+       standard table rebuild: create the new table, copy, swap names, drop
+       the old one.
 
     On hosted Turso each statement is a separate autocommitted round-trip, so
     the rebuild is *not* atomic: a failure between the two renames would leave
     the data intact but parked under ``postings_migrated``. Rather than depend
     on transaction semantics the HTTP transport may not offer, the sequence is
     ordered so no step can lose data and ``_recover_interrupted_migration``
-    finishes any half-done swap on the next run. Returns True if the rebuild
+    finishes any half-done swap on the next run. Returns True if any migration
     ran, False if the schema was already current (the common case, costing one
     ``sqlite_master`` read).
     """
@@ -163,18 +188,25 @@ def migrate_postings_schema(client: Connection) -> bool:
     row = client.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'postings'"
     ).fetchone()
-    if row is None or "'manual'" in (row[0] or ""):
+    if row is None:
         return False
-    client.execute("DROP TABLE IF EXISTS postings_migrated")
-    client.execute(f"CREATE TABLE postings_migrated ({_POSTINGS_COLUMNS})")
-    client.execute(
-        f"INSERT INTO postings_migrated ({_POSTINGS_COLUMN_NAMES}) "
-        f"SELECT {_POSTINGS_COLUMN_NAMES} FROM postings"
-    )
-    client.execute("ALTER TABLE postings RENAME TO postings_pre_manual")
-    client.execute("ALTER TABLE postings_migrated RENAME TO postings")
-    client.execute("DROP TABLE postings_pre_manual")
-    return True
+    sql = row[0] or ""
+    migrated = False
+    if "decided_at" not in sql:
+        client.execute("ALTER TABLE postings ADD COLUMN decided_at TEXT")
+        migrated = True
+    if "'manual'" not in sql:
+        client.execute("DROP TABLE IF EXISTS postings_migrated")
+        client.execute(f"CREATE TABLE postings_migrated ({_POSTINGS_COLUMNS})")
+        client.execute(
+            f"INSERT INTO postings_migrated ({_POSTINGS_COLUMN_NAMES}) "
+            f"SELECT {_POSTINGS_COLUMN_NAMES} FROM postings"
+        )
+        client.execute("ALTER TABLE postings RENAME TO postings_pre_manual")
+        client.execute("ALTER TABLE postings_migrated RENAME TO postings")
+        client.execute("DROP TABLE postings_pre_manual")
+        migrated = True
+    return migrated
 
 
 def _table_names(client: Connection) -> set[str]:
@@ -210,8 +242,10 @@ def insert_posting(client: Connection, posting: NewPosting) -> int | None:
         """
         INSERT INTO postings (
             company, title, url, date_posted, canonical_url,
-            normalized_company, title_slug, search_agent, decision
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            normalized_company, title_slug, search_agent, decision,
+            decided_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  CASE WHEN ? IS NULL THEN NULL ELSE datetime('now') END)
         ON CONFLICT(canonical_url) DO NOTHING
         RETURNING id
         """,
@@ -224,6 +258,9 @@ def insert_posting(client: Connection, posting: NewPosting) -> int | None:
             posting.normalized_company,
             posting.title_slug,
             posting.search_agent,
+            posting.decision,
+            # A manual add is decided Apply in the INSERT itself, so its
+            # review date is the insert; searched rows stay NULL until Step 3.
             posting.decision,
         ),
     )
@@ -281,9 +318,15 @@ def record_decision(
     decision: str,
     fit_feedback: str | None,
 ) -> None:
-    """Write a user's ``Apply``/``Skip`` decision and optional feedback."""
+    """Write a user's ``Apply``/``Skip`` decision and optional feedback.
+
+    ``decided_at`` is refreshed on every write — first decisions and in-session
+    amendments alike — so the prompt-refinement loop's "new since the last
+    run" scope sees amended rows again.
+    """
     client.execute(
-        "UPDATE postings SET decision = ?, fit_feedback = ? WHERE id = ?",
+        "UPDATE postings SET decision = ?, fit_feedback = ?, decided_at = datetime('now') "
+        "WHERE id = ?",
         (decision, fit_feedback, posting_id),
     )
 
@@ -387,8 +430,13 @@ def set_decision(client: Connection, posting_id: int, decision: str) -> None:
     Distinct from ``record_decision`` (which writes both) because the direct
     job-add path may upgrade a row the user already reviewed: the note they
     wrote about it is still worth keeping, and is still ground-truth material.
+    ``decided_at`` is refreshed — a promotion is a new decision, so the row
+    re-enters the prompt-refinement scope.
     """
-    client.execute("UPDATE postings SET decision = ? WHERE id = ?", (decision, posting_id))
+    client.execute(
+        "UPDATE postings SET decision = ?, decided_at = datetime('now') WHERE id = ?",
+        (decision, posting_id),
+    )
 
 
 def record_finding(
@@ -455,3 +503,53 @@ def ab_report(client: Connection) -> dict:
         """
     ).fetchall()
     return {"coverage": coverage, "overlap": overlap, "precision": precision}
+
+
+def refinement_cutoff(client: Connection) -> str | None:
+    """The last prompt-refinement run's ``run_at`` — the ground-truth cutoff."""
+    row = client.execute("SELECT MAX(run_at) FROM prompt_refinement_runs").fetchone()
+    return row[0] if row else None
+
+
+def rows_for_refinement(client: Connection, cutoff: str | None) -> list[tuple]:
+    """Decided rows the prompt-refinement loop has not yet considered.
+
+    Only rows with a non-NULL ``decided_at`` are ever in scope: NULL marks a
+    decision that predates the column, already incorporated by the manual
+    refinement rounds (prd.md). ``cutoff`` (the previous run's ``run_at``)
+    narrows to what is genuinely new; re-deciding a row refreshes
+    ``decided_at`` and returns it to scope.
+    """
+    sql = (
+        "SELECT id, company, title, url, location, date_posted, search_agent, "
+        "decision, fit_feedback, jd_markdown, decided_at FROM postings "
+        "WHERE decision IS NOT NULL AND decided_at IS NOT NULL"
+    )
+    params: tuple = ()
+    if cutoff is not None:
+        sql += " AND decided_at > ?"
+        params = (cutoff,)
+    return list(client.execute(sql + " ORDER BY decided_at ASC, id ASC", params).fetchall())
+
+
+def decided_history(client: Connection) -> list[tuple]:
+    """Every decided row, compactly — the refiner's pattern-reference list.
+
+    Deliberately excludes the JDs and feedback text: history is context for
+    confirming that a pattern seen in the new rows genuinely recurs, not
+    material to be wholesale re-reviewed (prd.md).
+    """
+    return list(
+        client.execute(
+            "SELECT id, company, title, search_agent, decision FROM postings "
+            "WHERE decision IS NOT NULL ORDER BY id ASC"
+        ).fetchall()
+    )
+
+
+def record_refinement_run(client: Connection, *, considered: int, changed: bool) -> None:
+    """Log one refinement run; its ``run_at`` becomes the next run's cutoff."""
+    client.execute(
+        "INSERT INTO prompt_refinement_runs (considered, changed) VALUES (?, ?)",
+        (considered, 1 if changed else 0),
+    )

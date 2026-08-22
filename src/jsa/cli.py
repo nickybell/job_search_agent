@@ -27,6 +27,7 @@ from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, schedule_for_date
 from .refetch import describe, run_refetch
+from .refine import run_refine
 from .review import run_review
 from .search.prompt import EASTERN
 from .tracker import TrackerError, run_tracker
@@ -301,8 +302,9 @@ def generate_command(posting_id: int | None, dry_run: bool) -> None:
 
     For each ``Apply`` posting not yet in the tracker (``--id`` waives the
     tracker condition, never the Apply one), ensures the packet directory and
-    ``job_posting.md``, tailors ``base_resume.docx`` in one pass (a structured
-    patch applied by python-docx; PDF via LibreOffice headless), writes
+    ``job_posting.md``, tailors the best-fit template from ``resume_templates/``
+    in one pass (the model picks the template; a structured patch applied by
+    python-docx; PDF via LibreOffice headless), writes
     ``resume_changelog.md``, and finishes by appending the row to the tracker
     Sheet (Step 5). A row with no captured JD is skipped, never tailored
     blind; a hand-filled ``job_posting.md`` in the packet directory is used as
@@ -330,6 +332,38 @@ def generate_command(posting_id: int | None, dry_run: bool) -> None:
     click.echo(str(summary))
     if summary.failed or summary.track_failed:
         raise SystemExit(1)
+
+
+@main.command("refine")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report the ground truth in scope without running the model or recording a run.",
+)
+def refine_command(dry_run: bool) -> None:
+    """Refine the search prompt from new ground truth (the weekly PR loop).
+
+    Considers only postings decided since the last recorded refinement run,
+    drives the refiner agent over this checkout, and writes the PR body to
+    ``.refine_pr_body.md``. The scheduled GitHub Actions workflow commits the
+    resulting diff and opens the pull request; running this by hand is the
+    manual escape hatch and produces the same working-tree diff for you to
+    commit (or discard) yourself.
+    """
+    _configure_logging()
+    config = load_config()
+    summary = run_refine(config, dry_run=dry_run)
+    if summary.considered == 0:
+        click.echo("No new ground truth since the last refinement run.")
+        return
+    if dry_run:
+        return
+    if summary.changed_files:
+        click.echo(f"Proposed changes to: {', '.join(summary.changed_files)}")
+    else:
+        click.echo("The refiner proposed no changes.")
+    click.echo(f"PR body written to {summary.pr_body_path}")
 
 
 @main.command("track")

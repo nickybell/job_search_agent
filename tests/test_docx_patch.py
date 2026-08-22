@@ -44,7 +44,7 @@ def index_of(doc, text: str) -> int:
 
 
 def patch_of(*changes: dict) -> TailoringPatch:
-    return TailoringPatch(changes=[PatchChange(**c) for c in changes])
+    return TailoringPatch(base="template", changes=[PatchChange(**c) for c in changes])
 
 
 # --- the numbered view the model sees --------------------------------------
@@ -140,15 +140,28 @@ def test_a_no_op_change_is_dropped_not_applied():
 
 
 def test_parse_patch_tolerates_fences_and_surrounding_prose():
-    raw = 'Here is the patch:\n```json\n{"summary": "s", "changes": []}\n```\nDone.'
+    raw = (
+        "Here is the patch:\n```json\n"
+        '{"base": "customer-education", "summary": "s", "changes": []}\n'
+        "```\nDone."
+    )
     patch = parse_patch(raw)
+    assert patch.base == "customer-education"
     assert patch.summary == "s"
+    assert patch.new_family is None
     assert patch.changes == []
 
 
 def test_parse_patch_rejects_non_json_output():
     with pytest.raises(PatchError):
         parse_patch("I would rather answer in prose.")
+
+
+def test_parse_patch_rejects_a_patch_without_a_base():
+    # base is how the patch names its template; a patch that omits it cannot
+    # be applied to anything and must fail loudly, not guess.
+    with pytest.raises(PatchError):
+        parse_patch('{"summary": "s", "changes": []}')
 
 
 # --- the changelog ----------------------------------------------------------
@@ -165,13 +178,34 @@ def test_changelog_renders_each_change_with_before_after_and_rationale():
         title="Enablement Lead",
         model="claude-opus-4-8",
         date_generated="2026-08-21",
+        base="customer-education",
+        base_rationale="closest role family",
+        new_template=None,
         summary="Emphasize enablement.",
         applied=applied,
     )
     assert "Acme" in text and "Enablement Lead" in text
+    assert "`customer-education` template" in text
+    assert "closest role family" in text
     assert "**Before:** Wrote help-center articles" in text
     assert "**After:** Wrote playbooks" in text
     assert "**Why:** JD fit" in text
+
+
+def test_changelog_flags_a_new_template_for_curation():
+    text = render_changelog(
+        company="Acme",
+        title="AI Enablement Lead",
+        model="claude-opus-4-8",
+        date_generated="2026-08-22",
+        base="customer-education",
+        base_rationale=None,
+        new_template="ai-enablement",
+        summary=None,
+        applied=[],
+    )
+    assert "NEW TEMPLATE CREATED" in text
+    assert "resume_templates/ai-enablement.docx" in text
 
 
 def test_changelog_says_so_when_nothing_changed():
@@ -180,6 +214,9 @@ def test_changelog_says_so_when_nothing_changed():
         title="Enablement Lead",
         model="claude-opus-4-8",
         date_generated="2026-08-21",
+        base="customer-education",
+        base_rationale=None,
+        new_template=None,
         summary=None,
         applied=[],
     )
