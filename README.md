@@ -257,10 +257,15 @@ turso db tokens create job-search-agent       # -> TURSO_AUTH_TOKEN
 
 Put both in your local `.env`, then `uv run jsa init-db` to create the table.
 
-**2. API keys.** Create an [Anthropic API key](https://console.anthropic.com/) (with
-billing enabled — the weekly Friday run is an Opus deep-research session) and a
-[Perplexity API key](https://www.perplexity.ai/settings/api). Add both to `.env`
-for local runs.
+**2. Claude + Perplexity auth.** Every Claude service here (the weekly deep-research
+search, `jsa generate`, `jsa refine`) drives the Claude Agent SDK, so they
+authenticate with a subscription OAuth token from `claude setup-token`, read from
+`CLAUDE_CODE_OAUTH_TOKEN` — usage draws from the plan, not per-call API billing.
+An [Anthropic API key](https://console.anthropic.com/) in `ANTHROPIC_API_KEY`
+also works (pay-as-you-go), but never set both: the CLI prefers
+`ANTHROPIC_API_KEY` and 401s if that variable holds an OAuth value. Add a
+[Perplexity API key](https://www.perplexity.ai/settings/api) too. Put them in
+`.env` for local runs.
 
 **3. Fly app + secrets.** Install [flyctl](https://fly.io/docs/flyctl/install/), then:
 
@@ -270,7 +275,7 @@ fly launch --no-deploy         # reuses the committed fly.toml
 fly secrets set --stage \      # --stage is required: this app has no `fly deploy` release,
   TURSO_DATABASE_URL="libsql://..." \   # so plain `fly secrets set` fails trying to auto-deploy
   TURSO_AUTH_TOKEN="..." \               # against a release that doesn't exist
-  ANTHROPIC_API_KEY="sk-ant-..." \
+  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..." \   # `claude setup-token`; don't also set ANTHROPIC_API_KEY
   PERPLEXITY_API_KEY="pplx-..."
 ```
 
