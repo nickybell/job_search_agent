@@ -166,8 +166,9 @@ def migrate_postings_schema(client: Connection) -> bool:
     1. **Add ``decided_at``** (2026-08-22) — a plain ``ALTER TABLE ADD COLUMN``,
        run *before* the rebuild below so the rebuild's named copy list (which
        includes the column) always finds it in the source table. Rows decided
-       before the column existed keep ``NULL``, meaning "already incorporated
-       by the manual refinement rounds" (prd.md); re-deciding a row fills it.
+       before the column existed keep ``NULL`` until re-decided; the
+       prompt-refinement loop treats a NULL ``decided_at`` as in scope on its
+       first-ever run and out of scope thereafter (prd.md).
     2. **Widen the legacy ``search_agent`` CHECK to admit ``'manual'``.**
        Databases created before the direct job-add path constrain
        ``search_agent`` to the two search agents, which rejects a hand-added
@@ -514,16 +515,19 @@ def refinement_cutoff(client: Connection) -> str | None:
 def rows_for_refinement(client: Connection, cutoff: str | None) -> list[tuple]:
     """Decided rows the prompt-refinement loop has not yet considered.
 
-    Only rows with a non-NULL ``decided_at`` are ever in scope: NULL marks a
-    decision that predates the column, already incorporated by the manual
-    refinement rounds (prd.md). ``cutoff`` (the previous run's ``run_at``)
-    narrows to what is genuinely new; re-deciding a row refreshes
-    ``decided_at`` and returns it to scope.
+    On the first-ever run (``cutoff`` is None) every decided row is in scope,
+    including rows with a NULL ``decided_at`` (decided before the column
+    existed) — that whole backlog is real ground truth the loop has never
+    seen, and there is no reason to withhold it. Once a run has been
+    recorded, ``cutoff`` narrows to what is genuinely new (``decided_at >
+    cutoff``); a NULL ``decided_at`` can never satisfy that comparison, so it
+    naturally drops out of scope, and re-deciding the row (which refreshes
+    ``decided_at``) is how it re-enters.
     """
     sql = (
         "SELECT id, company, title, url, location, date_posted, search_agent, "
         "decision, fit_feedback, jd_markdown, decided_at FROM postings "
-        "WHERE decision IS NOT NULL AND decided_at IS NOT NULL"
+        "WHERE decision IS NOT NULL"
     )
     params: tuple = ()
     if cutoff is not None:
