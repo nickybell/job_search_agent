@@ -283,16 +283,11 @@ The search prompt is refined from Step 3's accumulated ground truth by an **auto
 
 **The prompt stays standalone — a hard preference (2026-08-22).** `deep_research_prompt.md` is downstream of the ground truth but never refers to it: no watermark, no incorporated-through marker, no provenance annotations in the prompt text. Consequence, accepted: without in-prompt memory of which feedback produced which line, successive runs can oscillate wording. Provenance lives where it belongs — each run is one PR with its rationale, so git history traces every rule to the round that introduced it and a rule that hurt yield is revertible.
 
-**Guardrails are mechanical, not instructional:**
-
-- **Sentinel-delimited fixed regions.** The load-bearing machinery — the JSON output contract, the `{{SEARCH_WINDOW}}` placeholder, the liveness/verifiability section and its ATS index-check table — sits inside marked regions the refiner must not edit.
-- **A pinning test.** A pytest asserts the invariants (placeholder present exactly once, contract fields intact, ATS table rows present, sentinels in place), so a violating edit fails `uv run pytest` — and fails the PR — before any human attention is spent.
-- **PR-not-direct-commit is the real gate.** The refiner's edit lands as a pull request carrying the rationale and diff; the user merges. Genuine contradictions or ambiguities — which an interactive session would resolve with a clarifying question — go into the PR body as open questions instead, since the cron has no one to ask.
-- **Recall-first survives every round.** Edits reduce wasted review time; they never create false negatives on roles the user would want. Anything too ambiguous to encode goes to `TODO.md` as a checkbox with reasoning.
+**The guardrail is the PR — deliberately no sentinels, no pinning test (decided 2026-08-22).** The refiner's edit lands as a pull request carrying the rationale and diff, and the user merges; that human review *is* the protection for the load-bearing machinery, and adding mechanical guards on top of it was considered and declined. The refiner's instructions (`refine_search_prompt.md`) carry the do-not-touch list — the JSON output contract, the `{{SEARCH_WINDOW}}` placeholder, the liveness/verifiability section and its ATS index-check table — and the diff is small enough that a violation is obvious at review. Two further instructional guardrails: **recall-first survives every round** (edits reduce wasted review time; they never create false negatives on roles the user would want), and genuine contradictions or ambiguities — which an interactive session would resolve with a clarifying question — go into the PR body as open questions, since the cron has no one to ask; anything too ambiguous to encode goes to `TODO.md` as a checkbox with reasoning.
 
 **Each PR also syncs this document** — `prd.md` is the source of truth and must not drift from the prompt, so the criteria-describing sections here are updated in the same PR.
 
-**Runtime.** The refiner needs a repo checkout, the test suite, and the ability to open a PR — none of which the Fly search image has — so it runs as a scheduled GitHub Actions workflow (weekly), with the Turso and Anthropic credentials as repository secrets. The Fly cron keeps Steps 1–2; this loop is deliberately a separate runtime shaped around the PR.
+**Runtime.** The refiner needs a repo checkout and the ability to open a PR — none of which the Fly search image has — so it runs as a scheduled GitHub Actions workflow (weekly), with the Turso and Anthropic credentials as repository secrets. The Fly cron keeps Steps 1–2; this loop is deliberately a separate runtime shaped around the PR.
 
 ## Architecture
 
