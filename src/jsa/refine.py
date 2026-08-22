@@ -64,6 +64,15 @@ _MAX_TURNS = 80
 RunnerFn = Callable[[str], str]
 
 
+class RefineAgentError(RuntimeError):
+    """The headless refiner run ended in an error result.
+
+    Most often a retryable API error (HTTP 429/500/529) that outlived the CLI's
+    own retries: it still arrives as a ``subtype="success"`` result with
+    ``is_error`` set, so it must be detected explicitly rather than by subtype.
+    """
+
+
 def _repo_root() -> Path:
     # src/jsa/refine.py -> repo root is two parents up from src/jsa.
     return Path(__file__).resolve().parents[2]
@@ -156,10 +165,21 @@ async def _agent(prompt: str) -> str:
                 if isinstance(block, TextBlock):
                     assistant_text.append(block.text)
         elif isinstance(message, ResultMessage):
-            final_text = getattr(message, "result", "") or ""
-            cost = getattr(message, "total_cost_usd", None)
-            if cost is not None:
-                log.info("refinement agent finished ($%.4f)", cost)
+            # An error result (e.g. an API 429/500/529 that survived the CLI's
+            # own retries) still arrives as subtype "success" with is_error set,
+            # and the CLI then exits non-zero. Surface the real cause here — the
+            # HTTP status and the CLI's error text — instead of letting the SDK
+            # raise the opaque "returned an error result: success". Raising also
+            # leaves the run unrecorded, so its rows are reconsidered next run
+            # (the weekly cadence, or a manual workflow re-run).
+            if message.is_error:
+                status = message.api_error_status
+                detail = (message.result or "").strip() or message.subtype
+                where = f" (API error HTTP {status})" if status else ""
+                raise RefineAgentError(f"refinement agent failed{where}: {detail}")
+            final_text = message.result or ""
+            if message.total_cost_usd is not None:
+                log.info("refinement agent finished ($%.4f)", message.total_cost_usd)
     # The final message is the PR body; fall back to the last assistant text.
     return final_text or (assistant_text[-1] if assistant_text else "")
 
