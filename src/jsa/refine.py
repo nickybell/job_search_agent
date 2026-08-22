@@ -9,10 +9,11 @@ task is bounded synthesis over a small corpus delta, not the exhaustive
 source-checking that justifies ``xhigh`` on the search side.
 
 **Incrementality lives in the database, not the prompt** (a hard preference,
-2026-08-22): each run considers only rows whose ``decided_at`` is newer than
-the last recorded run in ``prompt_refinement_runs``, and exits quietly when
-there are none. The search prompt itself stays standalone — no watermarks, no
-ground-truth references — with oscillation across runs accepted; provenance
+2026-08-22): each run considers only rows newer than the last recorded run in
+``prompt_refinement_runs`` — on the very first run that means every decided
+row, NULL ``decided_at`` included — and exits quietly when there are none.
+The search prompt itself stays standalone — no watermarks, no ground-truth
+references — with oscillation across runs accepted; provenance
 lives in PR history. A run is recorded whether or not its PR merges (a
 rejected translation still *considered* its rows; re-deciding a posting is
 how it re-enters scope), and a run that errors records nothing, so its rows
@@ -95,7 +96,7 @@ def render_ground_truth(rows: list[tuple]) -> str:
         ) = row
         lines = [
             f"## id {posting_id} — {company} — {title}",
-            f"- decision: {decision} (recorded {decided_at})",
+            f"- decision: {decision} (recorded {decided_at or 'before decided_at existed'})",
             f"- search_agent: {search_agent}"
             + (
                 " — a manual add: the search did NOT surface this posting"

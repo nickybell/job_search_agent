@@ -17,22 +17,15 @@ reasoning live in `prd.md`; what happened lives in the git log.
 
 ## One-time setup
 
-- [ ] **Rotate the leaked credentials.** The Turso auth token, Anthropic API
-  key, and Perplexity API key were pasted in plaintext into a Claude Code
-  transcript during setup. Rotate all three, then set the fresh values with
-  `fly secrets set --stage` (plain `fly secrets set` fails on this app — it
-  tries to auto-deploy against a release that doesn't exist):
-  - Turso: `turso db tokens invalidate job-search-agent` → `turso db tokens create job-search-agent`
-  - Anthropic: revoke the old key in the console, issue a new one
-  - Perplexity: revoke the old key in settings, issue a new one
-- [ ] **Wire up the refinement workflow on GitHub.** Add the repo secrets
+- [X] **Wire up the refinement workflow on GitHub.** Add the repo secrets
   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `ANTHROPIC_API_KEY` (the
   rotated values, never the leaked ones); enable Settings → Actions → "Allow
   GitHub Actions to create and approve pull requests"; adjust the cron in
   `.github/workflows/refine-search-prompt.yml` if Sunday 13:00 UTC isn't the
-  slot you want. Smoke-test from the Actions tab via workflow_dispatch —
-  with no new ground truth it exits quietly, so a real exercise needs a
-  freshly decided posting.
+  slot you want. Smoke-test from the Actions tab via workflow_dispatch — the
+  first-ever run picks up every already-decided posting (including rows
+  decided before `decided_at` existed), so it exercises the loop immediately;
+  it only exits quietly on a *second* run with nothing newly decided since.
 - [ ] **Publish the OAuth consent screen** in the `***REMOVED***`
   GCP project ("In production") so the `gws` refresh token stops expiring
   every 7 days. Until then, `gws auth login` is the fix whenever a command
