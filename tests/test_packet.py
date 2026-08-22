@@ -1,8 +1,10 @@
 """Steps 1-2 of the Step 4 packet: directory creation and job_posting.md.
 
-Per prd.md (Resume Revisions), the fail-if-exists mkdir IS the idempotency
-guard, so the load-bearing claims here are that an existing directory -- even a
-half-built one -- is never clobbered, and that a missing JD degrades to a
+Per prd.md (Resume Revisions, revised 2026-08-21), Step 4's completion guard
+is added_to_tracker; on this standalone command the fail-if-exists mkdir is
+kept as a cheap safety, so the load-bearing claims here are that an existing
+directory -- even a half-built one -- is never clobbered (jsa generate, not
+this command, is what re-enters one), and that a missing JD degrades to a
 directory without a job_posting.md rather than a failure.
 """
 
@@ -75,8 +77,9 @@ def test_creates_the_directory_and_writes_the_jd(config, client, packets_root):
 
 
 def test_an_existing_directory_is_skipped_and_never_clobbered(config, client, packets_root):
-    # The mkdir is the idempotency guard: a packet already worked on (say, a
-    # tailored resume drafted by hand) must survive a re-run untouched.
+    # The standalone-path safety: a packet already worked on (say, a tailored
+    # resume refined by hand) must survive a re-run of jsa packet untouched.
+    # (jsa generate deliberately does not inherit this skip.)
     seed(client)
     existing = packets_root / "Acme - Customer Enablement Lead"
     existing.mkdir(parents=True)

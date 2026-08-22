@@ -41,13 +41,23 @@ def _extract_json(text: str) -> str:
     return text[start : end + 1]
 
 
+def extract_json_text(raw: str) -> str:
+    """The outermost JSON value in ``raw``, fences and surrounding prose stripped.
+
+    Shared with the Step 4 tailoring-patch parser (``docx_patch``), which
+    consumes the same kind of model output: JSON that usually arrives wrapped
+    in markdown fences or stray prose.
+    """
+    return _extract_json(_strip_fences(raw))
+
+
 def parse_search_output(raw: str) -> SearchOutput:
     """Parse and validate a search agent's raw output into a ``SearchOutput``.
 
     Accepts either the full ``{"postings": [...]}`` object or a bare postings
     array (which is wrapped before validation).
     """
-    candidate = _extract_json(_strip_fences(raw))
+    candidate = extract_json_text(raw)
     data = json.loads(candidate)
     if isinstance(data, list):
         data = {"postings": data}

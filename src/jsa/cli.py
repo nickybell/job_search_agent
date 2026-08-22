@@ -2,14 +2,17 @@
 
 Wraps the automated Steps 1–2 pipeline (``search``), the schema bootstrap
 (``init-db``), the direct job-add path (``add``), the deterministic Step 3
-review loop (``review``), and the Step 5 tracker write (``track``). The search
-command is what the Fly.io cron runs; it is also invocable by hand with a
-parameterized window and agent.
+review loop (``review``), the drift reconciliation (``refetch``), Step 4's
+resume generation (``generate``, with ``packet`` as its deterministic head),
+and the Step 5 tracker write (``track``). The search command is what the
+Fly.io cron runs; it is also invocable by hand with a parameterized window and
+agent.
 
 The cloud/local split shows up here as which commands the Fly image ever runs:
-only ``cron`` (and ``search``/``init-db`` by hand). ``add``, ``review``, and
-``track`` are local — they want a terminal and, for ``track``, the local Google
-OAuth token held by the ``gws`` CLI.
+only ``cron`` (and ``search``/``init-db`` by hand). Everything else is local —
+wanting a terminal, the local disk (``base_resume.docx``, the packet
+directories), and, for the Sheet-touching commands, the local Google OAuth
+token held by the ``gws`` CLI.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from datetime import datetime
 
 import click
 
-from . import db, packet, prompting
+from . import db, generate, packet, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, schedule_for_date
@@ -257,8 +260,8 @@ def packet_command(posting_id: int | None, dry_run: bool) -> None:
     ``~/Documents/Job Applications/{normalized_company} - {title_slug}`` with a
     fail-if-exists mkdir — an existing packet is skipped, never clobbered — and
     writes the captured job description inside as ``job_posting.md``. The
-    resume tailoring itself (Step 4 proper) is still unbuilt; this covers the
-    deterministic file work it will sit on.
+    resume tailoring itself is ``jsa generate``, which builds on these
+    directories (and, unlike this command, re-enters an existing bare one).
     """
     _configure_logging()
     config = load_config()
@@ -277,6 +280,56 @@ def packet_command(posting_id: int | None, dry_run: bool) -> None:
         click.echo(f"(dry run — nothing created) {summary}")
         return
     click.echo(str(summary))
+
+
+@main.command("generate")
+@click.option(
+    "--id",
+    "posting_id",
+    type=int,
+    default=None,
+    help="Generate one Apply posting's packet even if it is already in the tracker.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report what each queued row would do without touching anything.",
+)
+def generate_command(posting_id: int | None, dry_run: bool) -> None:
+    """Tailor a per-job resume and complete the application packet (Step 4).
+
+    For each ``Apply`` posting not yet in the tracker (``--id`` waives the
+    tracker condition, never the Apply one), ensures the packet directory and
+    ``job_posting.md``, tailors ``base_resume.docx`` in one pass (a structured
+    patch applied by python-docx; PDF via LibreOffice headless), writes
+    ``resume_changelog.md``, and finishes by appending the row to the tracker
+    Sheet (Step 5). A row with no captured JD is skipped, never tailored
+    blind; a hand-filled ``job_posting.md`` in the packet directory is used as
+    the JD instead.
+    """
+    _configure_logging()
+    config = load_config()
+    try:
+        summary, results = generate.run_generate(config, posting_id=posting_id, dry_run=dry_run)
+    except generate.GenerateError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if summary.eligible == 0:
+        if posting_id is not None:
+            raise click.ClickException(
+                f"id {posting_id} is not an Apply posting (or does not exist) — "
+                "resumes are only generated for jobs decided Apply."
+            )
+        click.echo("No Apply postings awaiting a resume packet.")
+        return
+    for result in results:
+        click.echo(generate.describe(result))
+    if dry_run:
+        click.echo(f"(dry run — nothing generated) {summary}")
+        return
+    click.echo(str(summary))
+    if summary.failed or summary.track_failed:
+        raise SystemExit(1)
 
 
 @main.command("track")

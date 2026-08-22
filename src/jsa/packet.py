@@ -1,21 +1,23 @@
 """Steps 1–2 of the Step 4 application packet: create and seed the directory.
 
-Step 4 proper (the per-job resume tailoring) is still unbuilt — blocked on the
-TK tailoring instructions and the ``.docx``/``.pdf`` toolchain — but the
-subagent's first two actions are deterministic file I/O, so they are a plain
+The resume tailoring itself is ``jsa generate`` (``generate.py``), but its
+first two actions are deterministic file I/O, so they are also a standalone
 CLI command (``jsa packet``) on the same reasoning as review and track: no
 model in the loop.
 
-Per prd.md (Resume Revisions), the directory creation *is* the idempotency
-guard: an atomic, fail-if-exists ``mkdir`` (no ``-p`` clobber) at
-``~/Documents/Job Applications/{normalized_company} - {title_slug}``, composed
-directly from the row's already filesystem-safe fields. If the directory
-exists the row is skipped before any other work, so a packet already built —
-or half-built by an interrupted run — is never clobbered. ``job_posting.md``
-is then written inside from the row's captured ``jd_markdown``, so the
-tailored resume and the source JD will live together. A row with no captured
-JD still gets its directory; the gap is reported, not fatal (the same
-degrade-don't-destroy stance as the pipeline).
+Per prd.md (Resume Revisions, revised 2026-08-21), Step 4's completion guard
+is ``added_to_tracker``, *not* directory-exists — a directory without a
+completed, tracked resume is resumable work. On this standalone command the
+atomic fail-if-exists ``mkdir`` (no ``-p`` clobber) at ``~/Documents/Job
+Applications/{normalized_company} - {title_slug}`` is kept as a cheap safety:
+an existing directory (even half-built) is skipped before any other work,
+never clobbered. ``jsa generate`` deliberately does *not* inherit that skip —
+it reuses this module's pure helpers but *ensures* the directory, re-entering
+a bare one (an interrupted run, a ``jsa refetch`` rebuild) and completing it.
+``job_posting.md`` is written inside from the row's captured ``jd_markdown``,
+so the tailored resume and the source JD live together. A row with no
+captured JD still gets its directory; the gap is reported, not fatal (the
+same degrade-don't-destroy stance as the pipeline).
 """
 
 from __future__ import annotations
