@@ -5,6 +5,9 @@ resume_templates/
 # --- Secrets ---
 .env
 
+# --- Refinement-run scratch (the PR body the CI workflow consumes) ---
+.refine_pr_body.md
+
 # --- Python ---
 .venv/
 __pycache__/

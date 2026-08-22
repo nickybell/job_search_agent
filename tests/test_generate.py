@@ -4,9 +4,9 @@ NOTE: agent-authored and awaiting Nicky's review (the standing rule in
 TODO.md).
 
 Hermetic: a throwaway ``file:`` SQLite DB, a stub tailor callable instead of
-the model, a stub soffice that just creates the .pdf, and a stub gws binary
-for the tracker append -- nothing touches the network, LibreOffice, or a real
-Sheet.
+the model, a stub soffice that just creates the .pdf, a stub gws binary for
+the tracker append, and a tmp-path template library -- nothing touches the
+network, LibreOffice, a real Sheet, or the real resume_templates/.
 """
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ from docx import Document
 
 from jsa import db, generate
 
-BASE_BULLET = "Led onboarding programs for enterprise customers"
+EDU_BULLET = "Designed role-based learning paths for enterprise customers"
+CS_BULLET = "Drove adoption, retention, and expansion for enterprise accounts"
 
 
 @pytest.fixture(autouse=True)
@@ -30,15 +31,17 @@ def packets_root(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def base_resume(tmp_path, monkeypatch):
-    """A real minimal .docx standing in for base_resume.docx."""
-    path = tmp_path / "base_resume.docx"
-    doc = Document()
-    doc.add_paragraph("Nicholas Bell")
-    doc.add_paragraph(BASE_BULLET)
-    doc.save(str(path))
-    monkeypatch.setenv("JSA_BASE_RESUME", str(path))
-    return path
+def templates_dir(tmp_path, monkeypatch):
+    """A two-template library standing in for resume_templates/."""
+    directory = tmp_path / "resume_templates"
+    directory.mkdir()
+    for slug, bullet in (("customer-education", EDU_BULLET), ("customer-success", CS_BULLET)):
+        doc = Document()
+        doc.add_paragraph("Nicholas Bell")
+        doc.add_paragraph(bullet)
+        doc.save(str(directory / f"{slug}.docx"))
+    monkeypatch.setenv("JSA_RESUME_TEMPLATES_DIR", str(directory))
+    return directory
 
 
 @pytest.fixture(autouse=True)
@@ -90,9 +93,21 @@ def seed(client, *, decision="Apply", tracked=0, jd="# The JD", n=0) -> int:
     return posting_id
 
 
-def make_tailor(changes=None, summary="Emphasize enablement."):
+def make_tailor(
+    base="customer-education",
+    changes=None,
+    *,
+    new_family=None,
+    summary="Emphasize enablement.",
+):
     """A tailor callable returning a fixed patch; records the prompts it saw."""
-    payload = {"summary": summary, "changes": changes or []}
+    payload = {
+        "base": base,
+        "base_rationale": "closest role family",
+        "new_family": new_family,
+        "summary": summary,
+        "changes": changes or [],
+    }
 
     def fake(prompt: str) -> str:
         fake.calls.append(prompt)
@@ -102,11 +117,11 @@ def make_tailor(changes=None, summary="Emphasize enablement."):
     return fake
 
 
-def bullet_index(base_resume) -> int:
+def bullet_index(templates_dir, slug: str, text: str) -> int:
     # Derived, not hardcoded, so the tests don't depend on the default
     # template's initial paragraph count.
-    doc = Document(str(base_resume))
-    return next(i for i, p in enumerate(doc.paragraphs) if p.text == BASE_BULLET)
+    doc = Document(str(templates_dir / f"{slug}.docx"))
+    return next(i for i, p in enumerate(doc.paragraphs) if p.text == text)
 
 
 def tracked_flag(client, posting_id) -> int:
@@ -117,13 +132,13 @@ def tracked_flag(client, posting_id) -> int:
 # --- the happy path ---------------------------------------------------------
 
 
-def test_tailors_renders_both_formats_and_tracks(config, client, packets_root, base_resume):
+def test_tailors_renders_both_formats_and_tracks(config, client, packets_root, templates_dir):
     posting_id = seed(client)
-    replacement = "Led enterprise onboarding and enablement programs"
+    replacement = "Designed enterprise onboarding and enablement programs"
     tailor = make_tailor(
         changes=[
             {
-                "paragraph": bullet_index(base_resume),
+                "paragraph": bullet_index(templates_dir, "customer-education", EDU_BULLET),
                 "replacement": replacement,
                 "rationale": "match the JD",
             }
@@ -135,6 +150,7 @@ def test_tailors_renders_both_formats_and_tracks(config, client, packets_root, b
     assert (summary.eligible, summary.generated, summary.tracked) == (1, 1, 1)
     path = packets_root / "Acme - Customer Enablement Lead"
     assert results[0].path == path
+    assert results[0].base == "customer-education"
     assert (path / "job_posting.md").read_text() == "# The JD\n"
     # prd: spaces removed from the file names, kept in the directory name.
     docx_file = path / "NicholasBell_Resume_CustomerEnablementLead_Acme.docx"
@@ -143,18 +159,80 @@ def test_tailors_renders_both_formats_and_tracks(config, client, packets_root, b
     assert replacement in [p.text for p in Document(str(docx_file)).paragraphs]
     changelog = (path / "resume_changelog.md").read_text()
     assert "match the JD" in changelog
+    # The template pick and its rationale are part of what the user reviews.
+    assert "`customer-education` template" in changelog
+    assert "closest role family" in changelog
     # The seam into Step 5: flag set only after the (stubbed) API confirmation.
     assert tracked_flag(client, posting_id) == 1
 
 
-def test_the_prompt_carries_the_jd_and_the_numbered_base(config, client, base_resume):
+def test_the_prompt_carries_the_jd_and_every_template(config, client):
     seed(client)
     tailor = make_tailor()
     generate.run_generate(config, tailor=tailor)
     prompt = tailor.calls[0]
     assert "# The JD" in prompt
-    assert BASE_BULLET in prompt
+    assert "### Template: customer-education" in prompt
+    assert "### Template: customer-success" in prompt
+    assert EDU_BULLET in prompt and CS_BULLET in prompt
     assert "{{" not in prompt  # every template slot interpolated
+
+
+# --- the template library ---------------------------------------------------
+
+
+def test_an_unknown_base_template_fails_the_row(config, client):
+    posting_id = seed(client)
+
+    summary, results = generate.run_generate(config, tailor=make_tailor(base="project-management"))
+
+    assert (summary.failed, summary.generated) == (1, 0)
+    assert "unknown template" in results[0].error
+    assert tracked_flag(client, posting_id) == 0
+
+
+def test_new_family_seeds_a_template_and_flags_the_changelog(
+    config, client, packets_root, templates_dir
+):
+    # The outward-expansion rule: no family fits, so the nearest template is
+    # the base and the tailored result becomes the new family's template,
+    # flagged for the curation scrub.
+    seed(client)
+
+    summary, results = generate.run_generate(config, tailor=make_tailor(new_family="AI Enablement"))
+
+    assert summary.generated == 1
+    assert results[0].new_template == "ai-enablement"
+    assert (templates_dir / "ai-enablement.docx").is_file()
+    changelog = (results[0].path / "resume_changelog.md").read_text()
+    assert "NEW TEMPLATE CREATED" in changelog
+    assert "resume_templates/ai-enablement.docx" in changelog
+
+
+def test_new_family_never_clobbers_an_existing_template(config, client, templates_dir):
+    # A colliding declaration means the family already exists; curated work is
+    # never overwritten, and the row still generates normally.
+    seed(client)
+    before = (templates_dir / "customer-success.docx").read_bytes()
+
+    summary, results = generate.run_generate(
+        config, tailor=make_tailor(new_family="customer-success")
+    )
+
+    assert summary.generated == 1
+    assert results[0].new_template is None
+    assert (templates_dir / "customer-success.docx").read_bytes() == before
+
+
+def test_an_empty_template_library_fails_loudly_before_any_row(
+    config, client, tmp_path, monkeypatch
+):
+    seed(client)
+    empty = tmp_path / "empty-library"
+    empty.mkdir()
+    monkeypatch.setenv("JSA_RESUME_TEMPLATES_DIR", str(empty))
+    with pytest.raises(generate.GenerateError):
+        generate.run_generate(config, tailor=make_tailor())
 
 
 # --- ensure-semantics (contrast with jsa packet's standalone skip) ----------
@@ -272,10 +350,3 @@ def test_dry_run_touches_nothing(config, client, packets_root, gws_calls):
     assert tailor.calls == []
     assert not packets_root.exists()
     assert not gws_calls.exists()
-
-
-def test_a_missing_base_resume_fails_loudly_before_any_row(config, client, tmp_path, monkeypatch):
-    seed(client)
-    monkeypatch.setenv("JSA_BASE_RESUME", str(tmp_path / "missing.docx"))
-    with pytest.raises(generate.GenerateError):
-        generate.run_generate(config, tailor=make_tailor())

@@ -1,0 +1,62 @@
+# The ground-truth prompt-refinement loop (prd.md, Search Prompt Updates).
+#
+# Weekly: pull the fit-review ground truth that is new since the last run
+# from Turso, drive the refiner agent over this checkout, and open a PR with
+# whatever it proposes. The PR review is the guardrail — nothing merges
+# without a human. `jsa refine` records the run in prompt_refinement_runs
+# (advancing the scope cutoff) whether or not the PR merges; a run that finds
+# no new ground truth exits quietly and records nothing.
+#
+# Setup this workflow assumes (see TODO.md):
+#   - repo secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ANTHROPIC_API_KEY
+#   - Settings → Actions → "Allow GitHub Actions to create and approve pull
+#     requests" enabled
+name: Refine search prompt from ground truth
+
+on:
+  schedule:
+    - cron: "0 13 * * 0" # Sundays 13:00 UTC (~9am ET) — ahead of Monday's search
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      # The Claude Agent SDK spawns the Claude Code CLI as a subprocess.
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run the refiner
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: uv run jsa refine
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No prompt changes proposed; nothing to open."
+            exit 0
+          fi
+          branch="refine/ground-truth-$(date -u +%Y%m%d-%H%M)"
+          git checkout -b "$branch"
+          git -c user.name="jsa-refiner" -c user.email="actions@users.noreply.github.com" \
+            commit -am "Refine search prompt from ground truth"
+          git push origin "$branch"
+          gh pr create \
+            --title "Refine search prompt from ground truth ($(date -u +%Y-%m-%d))" \
+            --body-file .refine_pr_body.md

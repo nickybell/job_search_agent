@@ -81,6 +81,17 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   standing rule. All stubs (tailor callable, soffice, gws) are hermetic; the
   first *real* `jsa generate` run (live model call, real LibreOffice render,
   real Sheet append) is the verification that matters and hasn't happened yet.
+  *Updated 2026-08-22:* also `test_refine.py`, the `decided_at` migration
+  tests in `test_db_migration.py`, and the template-library rework of
+  `test_generate.py` / `test_docx_patch.py`.
+- [ ] **Wire up the refinement workflow (one-time GitHub setup):** add the
+  repo secrets `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and
+  `ANTHROPIC_API_KEY` (the *rotated* keys — see the credential-rotation item
+  — never the leaked ones); enable Settings → Actions → "Allow GitHub
+  Actions to create and approve pull requests"; adjust the schedule if
+  Sunday 13:00 UTC isn't the slot you want. Smoke-test from the Actions tab
+  via workflow_dispatch — with no new ground truth it exits quietly, so the
+  first real exercise needs a freshly decided posting.
 
 ## Added 2026-08-21 (Step 4 → `jsa generate`)
 
@@ -183,34 +194,39 @@ not caught up yet — the checklist below is the gap.
   is the protection for the contract/window/liveness machinery; the
   do-not-touch list stays instructional, in `refine_search_prompt.md`.
 
-Implementation checklist:
+Implementation checklist (all code items landed 2026-08-22; what remains
+needs you and is in "What needs you" below):
 
-- [ ] **Seed `resume_templates/`** from the nine tailored resumes in
-  `~/Documents/Job Applications/` — pick the best 2–4 by role family, scrub
-  company-specific phrasing, name by family slug. Needs Nicky's judgment;
-  agent-assisted consolidation is a good first pass.
-- [ ] **Implement the template library in `jsa generate`**: prompt carries
-  every template's numbered text; output contract gains `base` (template
-  slug) and optional `new_family`; new-family results are saved back into the
-  library and flagged in the changelog; `JSA_RESUME_TEMPLATES_DIR` override;
-  update `tailoring_prompt.md`'s slots and contract; tests.
-- [ ] **Schema migration**: add `postings.decided_at` (plain `ALTER TABLE ADD
-  COLUMN` — no CHECK rebuild needed) set on every decision write
-  (`record_decision`, `set_decision`, the manual-add INSERT), plus the
+- [X] **Seed `resume_templates/`** — *first pass done 2026-08-22*:
+  `customer-education.docx` verbatim from the RSA leaf, `customer-success.docx`
+  from the 6sense leaf (one skills-line consolidation), `ai-enablement.docx`
+  derived from the RSA leaf (the most authored of the three). Your review is
+  the checkbox below.
+- [X] **Implement the template library in `jsa generate`** — *done
+  2026-08-22*: the prompt carries every template's numbered text; the output
+  contract gained `base` (+ `base_rationale`, rendered into the changelog)
+  and `new_family` (the expansion save, never clobbering an existing
+  template); `JSA_RESUME_TEMPLATES_DIR` override; `tailoring_prompt.md`
+  slots/contract updated; tests reworked.
+- [X] **Schema migration** — *done 2026-08-22 and applied to hosted Turso*:
+  `postings.decided_at` (plain ALTER, ordered before the CHECK rebuild in
+  `migrate_postings_schema`) set on every decision write, plus the
   `prompt_refinement_runs` table. Existing decided rows stay `NULL` =
   incorporated by the manual rounds; re-deciding refreshes the timestamp.
-- [ ] **Write `refine_search_prompt.md`**: port the interactive refinement
-  prompt (2026-08-16/17 rounds) plus the upgrades — the manual-adds recall
-  pass (unsupported-ATS misses accumulate toward the ATS-table escape hatch,
-  not prompt edits), JD pattern mining, incremental scope fed by the harness,
-  PR-body deliverables replacing AskUserQuestion, minimal-diff stance. Keep
-  the do-not-touch guardrails (contract, `{{SEARCH_WINDOW}}`, liveness + ATS
-  table) instructional — the PR review is the gate; no sentinels, no pinning
-  test.
-- [ ] **The GitHub Actions workflow**: weekly schedule; repo secrets for
-  Turso + Anthropic (set the *rotated* keys — see the credential-rotation
-  item below — never the leaked ones); run the refiner, open the PR via
-  `gh`; record the `prompt_refinement_runs` row. Pick the day/hour at setup.
+- [X] **`refine_search_prompt.md`** — *written 2026-08-22*: the interactive
+  prompt ported, plus the manual-adds recall pass, JD pattern mining,
+  harness-fed incremental scope, minimal-diff stance, and PR-body
+  deliverables replacing AskUserQuestion. Guardrails instructional — the PR
+  review is the gate. Content is yours to tune like the other prompts.
+- [X] **The GitHub Actions workflow** — *committed 2026-08-22*
+  (`.github/workflows/refine-search-prompt.yml`): Sundays 13:00 UTC +
+  `workflow_dispatch`, runs `jsa refine`, commits any diff to a
+  `refine/ground-truth-*` branch, opens the PR with `.refine_pr_body.md` as
+  the body. Secrets and the Actions PR permission are your setup (below).
+- [ ] **Review the seeded templates** (`resume_templates/*.docx`) —
+  especially `ai-enablement.docx`, the most authored; check the two edited
+  Skills lines and all three summaries before the first real
+  `jsa generate` run.
 
 ## What needs you (setup before the first run)
 

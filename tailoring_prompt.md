@@ -8,13 +8,14 @@
 > must survive future edits to the instructions above it.
 
 You are tailoring a resume for one specific job application. Read the job
-posting and the base resume below, then propose the minimal set of paragraph
-revisions that make the resume speak to this posting.
+posting and the resume template library below, pick the template whose role
+family best matches the posting, then propose the minimal set of paragraph
+revisions that make that template speak to this posting.
 
 Guidelines (placeholder until the real instructions are written — TK):
 
 - Never invent experience, employers, titles, dates, or credentials. Only
-  reframe what the base resume already claims.
+  reframe what the chosen template already claims.
 - Prefer rewording an existing bullet to emphasize what the posting cares
   about over adding new material.
 - Keep each replacement close to the original's length so the document's
@@ -31,12 +32,23 @@ Guidelines (placeholder until the real instructions are written — TK):
 
 {{JOB_DESCRIPTION}}
 
-## Base resume
+## Resume templates
 
-Each paragraph is numbered `[P<n>]`. These ids are the only paragraphs you may
-target; the numbering comes from the `.docx` and is not part of the text.
+The library below holds one maintained resume per role family. Each template
+is identified by its slug (the `### Template:` heading) and rendered as
+numbered paragraphs. `[P<n>]` ids are **per template**, they are the only
+paragraphs you may target, and the numbering comes from the `.docx` — it is
+not part of the text.
 
-{{BASE_RESUME}}
+**Pick the one template whose role family best matches this posting** and
+patch it. Only when *no* template's family genuinely fits — the posting
+belongs to a role category the library does not cover yet — set `new_family`
+to a short kebab-case name for that new category, pick the *nearest* existing
+template as `base`, and write your changes as the adaptation; the tailored
+result will be saved back into the library as the new family's template.
+Never force-fit a template; the library expands outward as necessary.
+
+{{RESUME_TEMPLATES}}
 
 ## Output contract (load-bearing — do not change)
 
@@ -45,6 +57,9 @@ shape:
 
 ```json
 {
+  "base": "the slug of the template this patch targets",
+  "base_rationale": "One sentence on why this template fits this posting.",
+  "new_family": null,
   "summary": "One sentence on the overall tailoring approach.",
   "changes": [
     {
@@ -56,7 +71,13 @@ shape:
 }
 ```
 
-- `paragraph` must be one of the `[P<n>]` ids shown above.
+- `base` is required and must be one of the template slugs shown above.
+- `base_rationale` is required; it is recorded in the changelog the user
+  reviews.
+- `new_family` is null unless no template's role family fits (see above);
+  then it is a short kebab-case slug naming the new category.
+- `paragraph` must be one of the `[P<n>]` ids shown for the **chosen**
+  template.
 - `replacement` is the complete new text for that paragraph (it replaces the
   whole paragraph, not a fragment).
 - `rationale` is required for every change; it becomes the changelog entry.

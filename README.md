@@ -16,8 +16,9 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
 | 4 | Tailor a per-job resume from `base_resume.docx` (structured patch → `.docx`/`.pdf` + changelog) | Local terminal |
 | 5 | Append `Apply` postings to the Google Sheet application tracker (Step 4's final action) | Local terminal |
+| — | Ground-truth loop: a weekly PR proposing search-prompt refinements from fit feedback | GitHub Actions |
 
-The “ground truth” prompt-refinement cron is specified in `prd.md` and will be built later, and the tailoring instructions (`tailoring_prompt.md`) are a committed placeholder with deliberately conservative guidance — see `TODO.md`.
+The tailoring instructions (`tailoring_prompt.md`) are a committed placeholder with deliberately conservative guidance, and the refinement instructions (`refine_search_prompt.md`) are a first version — both are meant to be revised in place; see `TODO.md`.
 
 ## Architecture
 
@@ -60,6 +61,7 @@ uv run jsa refetch --dry-run                   # report drift on Apply postings 
 uv run jsa packet --dry-run                    # preview the application-packet directories
 uv run jsa generate --dry-run                  # preview the resume-generation queue
 uv run jsa generate                            # tailor resumes + append to the tracker
+uv run jsa refine --dry-run                    # preview the prompt-refinement scope
 uv run jsa track --dry-run                     # preview the tracker rows
 uv run jsa track                               # append Apply postings to the Sheet
 ```
@@ -168,20 +170,26 @@ uv run jsa packet --id 42      # one packet, even if the row is already tracked
 `jsa generate` is Step 4. For each `Apply` posting not yet in the tracker it
 ensures the packet directory and `job_posting.md` (re-entering a bare
 directory left by an interrupted run or a refetch rebuild — the completion
-guard is `added_to_tracker`, not directory-exists), tailors
-`base_resume.docx` for the posting in one headless model call, and writes
-into the packet:
+guard is `added_to_tracker`, not directory-exists), tailors the best-fit
+template from the `resume_templates/` library in one headless model call,
+and writes into the packet:
 
 - the tailored resume as `.docx` **and** `.pdf` (LibreOffice headless renders
   the PDF); file names carry no spaces, the directory name does;
 - `resume_changelog.md` — one addressable entry per change with its
   rationale, rendered from the patch that was actually applied.
 
-The model (pinned `claude-opus-4-8`) never edits the file: it sees the base
-resume as numbered paragraphs and returns a **structured JSON patch** that
-`python-docx` applies deterministically — reproducible reruns, formatting
-that can't break. The tailoring instructions live in `tailoring_prompt.md`
-(currently a conservative placeholder; its output contract is load-bearing).
+The model (pinned `claude-opus-4-8`) never edits a file: it sees every
+template in the library (one maintained resume per role family) as numbered
+paragraphs, picks the one whose family fits the posting — the pick and its
+rationale land in the changelog — and returns a **structured JSON patch**
+that `python-docx` applies deterministically to a fresh copy of that
+template: reproducible reruns, formatting that can't break. The library
+expands outward rather than force-fitting: when no family matches, the model
+declares a new one, starts from the nearest template, and the tailored
+result is saved back as the new family's template (flagged for review). The
+tailoring instructions live in `tailoring_prompt.md` (currently a
+conservative placeholder; its output contract is load-bearing).
 
 A row with no captured JD is skipped, never tailored blind — run
 `jsa refetch --id 42`, or paste the JD into the packet's `job_posting.md` by
@@ -192,14 +200,26 @@ drafted. The queue runs on a small worker pool (`JSA_GENERATE_WORKERS`,
 default 3); `--id` regenerates one row even if it's already tracked (the
 closing append no-ops).
 
-Requires `base_resume.docx` at the repo root (gitignored) and LibreOffice
-(`soffice`) on PATH.
+Requires the `resume_templates/` library at the repo root (gitignored — one
+`.docx` per role family) and LibreOffice (`soffice`) on PATH.
 
 ```bash
 uv run jsa generate --dry-run  # preview the queue
 uv run jsa generate            # tailor + track everything queued
 uv run jsa generate --id 42    # one row, even if already tracked
 ```
+
+### Refining the search prompt from ground truth
+
+Every review decision — and every JD behind it — is labeled training data
+for the search prompt. A weekly GitHub Actions workflow runs `jsa refine`:
+it pulls only the postings decided since the last run (tracked in the
+database, not the prompt — the prompt stays a standalone brief), hands the
+refiner agent (pinned `claude-opus-4-8`) the feedback, the manually-added
+postings the search missed, and the full JDs to mine for implicit patterns,
+and opens a **pull request** with whatever prompt edits it proposes. Nothing
+merges without human review — that PR review is the guardrail. The same loop
+runs by hand as `uv run jsa refine`.
 
 ### Elevating to the tracker
 
@@ -372,6 +392,7 @@ src/jsa/
   packet.py          Step 4's deterministic head: create + seed the packet directory
   generate.py        Step 4: one-shot resume tailoring (structured patch) + track
   docx_patch.py      applies the tailoring patch to the .docx (pure)
+  refine.py          the ground-truth prompt-refinement loop (weekly PR via CI)
   prompting.py       line-edited terminal input shared by the local commands
   tracker.py         Step 5 write to the Google Sheet application tracker
   cli.py             the `jsa` command-line entry point

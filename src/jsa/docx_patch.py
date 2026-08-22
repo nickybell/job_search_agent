@@ -1,10 +1,10 @@
 """Apply a structured tailoring patch to a ``.docx``, deterministically.
 
-prd.md (Resume Revisions, decided 2026-08-21): the model never edits
-``base_resume.docx`` itself. It sees the base resume as numbered paragraphs,
-returns a JSON patch (paragraph id → replacement text + rationale), and this
-module applies that patch to an in-memory copy of the document with
-python-docx. The split is what buys reproducible reruns, formatting that
+prd.md (Resume Revisions, decided 2026-08-21): the model never edits a resume
+template itself. It sees each template as numbered paragraphs, names the one
+its patch targets (``base``), returns a JSON patch (paragraph id → replacement
+text + rationale), and this module applies that patch to an in-memory copy of
+the chosen template with python-docx. The split is what buys reproducible reruns, formatting that
 cannot break (only text inside existing paragraphs changes), and a changelog
 rendered *from the applied patch* rather than a second model artifact that
 could drift from what actually changed.
@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .search.parse import extract_json_text
 
@@ -37,13 +37,21 @@ class PatchChange(BaseModel):
 
 
 class TailoringPatch(BaseModel):
-    """The model's whole answer: an optional summary plus the change list.
+    """The model's whole answer: the template pick plus the change list.
 
-    An empty ``changes`` list is a valid answer — the prompt explicitly allows
-    \"no change is clearly better\" — and yields an unmodified copy of the base
-    resume plus a changelog saying so.
+    ``base`` names the resume template the patch targets (required — the model
+    picks the template, per prd.md decided 2026-08-22) and ``base_rationale``
+    is why, rendered into the changelog the user reviews. ``new_family``,
+    normally null, declares that no template's role family fits: the tailored
+    result then seeds the library's new family template (the outward-expansion
+    rule). An empty ``changes`` list is a valid answer — the prompt explicitly
+    allows \"no change is clearly better\" — and yields an unmodified copy of
+    the chosen template plus a changelog saying so.
     """
 
+    base: str
+    base_rationale: str | None = None
+    new_family: str | None = None
     summary: str | None = None
     changes: list[PatchChange] = Field(default_factory=list)
 
@@ -59,7 +67,10 @@ def parse_patch(raw: str) -> TailoringPatch:
         data = json.loads(extract_json_text(raw))
     except (ValueError, json.JSONDecodeError) as exc:
         raise PatchError(f"the tailoring output is not valid JSON: {exc}") from exc
-    return TailoringPatch.model_validate(data)
+    try:
+        return TailoringPatch.model_validate(data)
+    except ValidationError as exc:
+        raise PatchError(f"the tailoring output does not match the patch contract: {exc}") from exc
 
 
 def iter_paragraphs(document):
@@ -170,6 +181,9 @@ def render_changelog(
     title: str,
     model: str,
     date_generated: str,
+    base: str,
+    base_rationale: str | None,
+    new_template: str | None,
     summary: str | None,
     applied: list[AppliedChange],
 ) -> str:
@@ -177,15 +191,27 @@ def render_changelog(
 
     One addressable entry per change, each carrying its rationale — the
     artifact that lets an interactive review accept/reject change #N instead
-    of re-deriving the whole diff by hand.
+    of re-deriving the whole diff by hand. Also records which template was
+    chosen and why, and flags a new-template creation for the curation scrub
+    prd.md requires.
     """
     lines = [
         f"# Resume changelog — {company} — {title}",
         "",
         f"Tailored {date_generated} by `jsa generate` ({model}, structured patch "
-        "applied to `base_resume.docx`).",
+        f"applied to the `{base}` template).",
         "",
     ]
+    if base_rationale:
+        lines += [f"**Template choice:** {base_rationale}", ""]
+    if new_template:
+        lines += [
+            f"> **NEW TEMPLATE CREATED:** this tailoring seeded "
+            f"`resume_templates/{new_template}.docx` as a new role-family template. "
+            "It began life tailored to this one posting — review it and scrub "
+            "company-specific phrasing before its next use.",
+            "",
+        ]
     if summary:
         lines += [summary, ""]
     if not applied:
