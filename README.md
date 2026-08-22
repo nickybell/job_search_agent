@@ -1,12 +1,12 @@
 # Job Search Agent
 
-A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **daily search** for Customer Enablement / Education / AI Enablement roles, stores each posting **exactly once** (with its full job description), and collects fit feedback through a fast terminal review loop.
+A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **recurring search** for Customer Enablement / Education / AI Enablement roles, stores each posting **exactly once** (with its full job description), and collects fit feedback through a fast terminal review loop.
 
 > This repository doubles as a portfolio example of building a real system with AI coding tools. The design was worked out as a written spec **before** any code: [`prd.md`](./prd.md) is the source of truth, [`TODO.md`](./TODO.md) tracks open decisions, and [`deep_research_prompt.md`](./deep_research_prompt.md) is the search prompt itself. See [How this was built](#how-this-was-built).
 
 ## Status
 
-**In development.** This repo implements **Steps 1–3 and 5** of the PRD:
+**In development.** This repo implements **all five steps** of the PRD:
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
@@ -14,9 +14,10 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
-| 5 | Append `Apply` postings to the Google Sheet application tracker | Local terminal |
+| 4 | Tailor a per-job resume from `base_resume.docx` (structured patch → `.docx`/`.pdf` + changelog) | Local terminal |
+| 5 | Append `Apply` postings to the Google Sheet application tracker (Step 4's final action) | Local terminal |
 
-Step 4 (per-job resume revisions) and the “ground truth” prompt-refinement cron are specified in `prd.md` and will be built later. Until Step 4 exists, Step 5 is triggered by hand off the `Apply` decision rather than off a generated resume packet — see the interim note in `prd.md`.
+The “ground truth” prompt-refinement cron is specified in `prd.md` and will be built later, and the tailoring instructions (`tailoring_prompt.md`) are a committed placeholder with deliberately conservative guidance — see `TODO.md`.
 
 ## Architecture
 
@@ -45,7 +46,7 @@ uv sync                     # create the venv and install dependencies
 cp .env.example .env        # then fill in credentials (see below)
 ```
 
-Credentials (see `.env.example` for details): a Turso database URL + token, an Anthropic API key (A-day search), and a Perplexity API key (B-day search).
+Credentials (see `.env.example` for details): a Turso database URL + token, an Anthropic API key (the weekly Claude sweep), and a Perplexity API key (the recurring Mon/Wed/Fri search).
 
 ## Usage
 
@@ -57,6 +58,8 @@ uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one postin
 uv run jsa review                              # work through the fit-review backlog
 uv run jsa refetch --dry-run                   # report drift on Apply postings not yet applied to
 uv run jsa packet --dry-run                    # preview the application-packet directories
+uv run jsa generate --dry-run                  # preview the resume-generation queue
+uv run jsa generate                            # tailor resumes + append to the tracker
 uv run jsa track --dry-run                     # preview the tracker rows
 uv run jsa track                               # append Apply postings to the Sheet
 ```
@@ -68,8 +71,8 @@ searched one — canonicalize, idempotent insert, full-JD capture — tagged
 `search_agent = 'manual'`.
 
 **It is decided `Apply` on arrival.** Supplying the URL is the decision, so the
-posting skips the review backlog and goes straight into the tracker queue, ready
-for `jsa track`. Adding a URL already in the table promotes that row to `Apply`
+posting skips the review backlog and goes straight into the Step 4/5 queue,
+ready for `jsa generate`. Adding a URL already in the table promotes that row to `Apply`
 too (keeping any feedback you wrote about it), so handing over a posting you'd
 previously skipped is how you reverse that call.
 
@@ -128,11 +131,14 @@ index read fails loudly in the default scope rather than guessing; under
 `--id`/`--all` it's best-effort and only enables the Title refresh.
 
 If the job already has a packet directory, a title or JD change **rebuilds
-it** — new name, fresh `job_posting.md`. The packet is a derived artifact
-(the resume, once Step 4 exists, is regenerated from the base resume plus the
-JD), so the stale copy is deleted rather than archived, and the missing resume
-is itself the regenerate signal. The delete only ever targets the exact
-expected old directory, and a location-only change touches nothing.
+it**: refetch hands the row to `jsa generate`, which regenerates the packet —
+resume included — at the (possibly renamed) new path, and only then is the
+old directory removed. The packet is a derived artifact (the resume is a
+function of the base resume plus the JD), so the stale copy is deleted rather
+than archived; build-before-delete means a failed regeneration never deletes
+anything (it's flagged for a manual `jsa generate --id`). The delete only
+ever targets the exact expected old directory, and a location-only change
+touches nothing.
 
 ```bash
 uv run jsa refetch --dry-run   # what has changed upstream, without writing
@@ -144,17 +150,55 @@ uv run jsa refetch --id 42     # one row, selected unconditionally
 ### Preparing application packets
 
 `jsa packet` builds the per-job application-packet directory — the
-deterministic first half of Step 4 (the resume tailoring itself is still to
-come). For each `Apply` posting not yet in the tracker it creates
-`~/Documents/Job Applications/{Company} - {Title}` with a fail-if-exists
-`mkdir` (an existing packet is skipped, never clobbered) and writes the
-captured job description inside as `job_posting.md`. Since `jsa track`
-currently runs at Apply time, `--id` builds the packet for a row that's
-already tracked.
+deterministic first half of Step 4, useful when you want the directory and JD
+on disk without a model call. For each `Apply` posting not yet in the tracker
+it creates `~/Documents/Job Applications/{Company} - {Title}` with a
+fail-if-exists `mkdir` (an existing packet is skipped, never clobbered) and
+writes the captured job description inside as `job_posting.md`. `--id` builds
+the packet for a row that's already tracked (rows tracked under the earlier
+track-on-Apply flow predate their packets).
 
 ```bash
 uv run jsa packet --dry-run    # what would be created
 uv run jsa packet --id 42      # one packet, even if the row is already tracked
+```
+
+### Generating resumes
+
+`jsa generate` is Step 4. For each `Apply` posting not yet in the tracker it
+ensures the packet directory and `job_posting.md` (re-entering a bare
+directory left by an interrupted run or a refetch rebuild — the completion
+guard is `added_to_tracker`, not directory-exists), tailors
+`base_resume.docx` for the posting in one headless model call, and writes
+into the packet:
+
+- the tailored resume as `.docx` **and** `.pdf` (LibreOffice headless renders
+  the PDF); file names carry no spaces, the directory name does;
+- `resume_changelog.md` — one addressable entry per change with its
+  rationale, rendered from the patch that was actually applied.
+
+The model (pinned `claude-opus-4-8`) never edits the file: it sees the base
+resume as numbered paragraphs and returns a **structured JSON patch** that
+`python-docx` applies deterministically — reproducible reruns, formatting
+that can't break. The tailoring instructions live in `tailoring_prompt.md`
+(currently a conservative placeholder; its output contract is load-bearing).
+
+A row with no captured JD is skipped, never tailored blind — run
+`jsa refetch --id 42`, or paste the JD into the packet's `job_posting.md` by
+hand and re-run (that file is treated as input and is never overwritten). As
+its final action, `jsa generate` appends the row to the tracker Sheet
+(Step 5), so a job reaches the tracker only once a resume was actually
+drafted. The queue runs on a small worker pool (`JSA_GENERATE_WORKERS`,
+default 3); `--id` regenerates one row even if it's already tracked (the
+closing append no-ops).
+
+Requires `base_resume.docx` at the repo root (gitignored) and LibreOffice
+(`soffice`) on PATH.
+
+```bash
+uv run jsa generate --dry-run  # preview the queue
+uv run jsa generate            # tailor + track everything queued
+uv run jsa generate --id 42    # one row, even if already tracked
 ```
 
 ### Elevating to the tracker
@@ -326,8 +370,11 @@ src/jsa/
   review.py          Step 3 deterministic review loop
   refetch.py         reconcile stored postings against their (mutable) ATS record
   packet.py          Step 4's deterministic head: create + seed the packet directory
+  generate.py        Step 4: one-shot resume tailoring (structured patch) + track
+  docx_patch.py      applies the tailoring patch to the .docx (pure)
   prompting.py       line-edited terminal input shared by the local commands
   tracker.py         Step 5 write to the Google Sheet application tracker
   cli.py             the `jsa` command-line entry point
-tests/               hermetic pytest suite (throwaway SQLite, stubbed ATS + gws)
+tests/               hermetic pytest suite (throwaway SQLite; stubbed ATS, gws,
+                     soffice, and tailoring model)
 ```
