@@ -329,10 +329,10 @@ def pending_packets(client: Connection, posting_id: int | None = None) -> list[t
 
     The default queue mirrors prd.md's Step 4 eligibility: ``decision = 'Apply'
     AND added_to_tracker = 0``. Passing ``posting_id`` drops the tracker
-    condition -- but never the Apply one: while the interim track-on-Apply
-    trigger runs ``jsa track`` ahead of packet creation, most Apply rows are
-    tracked before any packet exists, and the explicit id is how a packet is
-    still built for one of those.
+    condition -- but never the Apply one: rows tracked under the earlier
+    track-on-Apply flow predate their packets, and a refetch-driven regenerate
+    targets a tracked row directly, so the explicit id is how a packet or
+    resume is still built for one of those.
     """
     sql = (
         "SELECT id, normalized_company, title_slug, company, title, jd_markdown "
