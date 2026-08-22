@@ -8,7 +8,11 @@
 # no new ground truth exits quietly and records nothing.
 #
 # Setup this workflow assumes (see TODO.md):
-#   - repo secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ANTHROPIC_API_KEY
+#   - repo secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN
+#     (the last is the output of `claude setup-token` — an OAuth token, NOT an
+#     API key; the refiner drives the Claude Code CLI, which reads it from
+#     CLAUDE_CODE_OAUTH_TOKEN. Putting it in ANTHROPIC_API_KEY sends it as an
+#     x-api-key header and 401s.)
 #   - Settings → Actions → "Allow GitHub Actions to create and approve pull
 #     requests" enabled
 name: Refine search prompt from ground truth
@@ -41,7 +45,7 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: uv run jsa refine
 
       - name: Open the pull request
