@@ -1,0 +1,115 @@
+# Redeploy the Fly.io search cron when a refine-search-prompt PR merges.
+#
+# The search prompt (deep_research_prompt.md) and all of src/ are baked into the
+# image, and the scheduled Fly machine is pinned to the image it was created with
+# — so a merged prompt change is inert until a new image is built and the machine
+# is moved onto it (README, "Update the running cron after a code or prompt
+# change"). The refinement loop's PRs (branch refine/ground-truth-*, opened by
+# refine-search-prompt.yml) are the one automated source of such changes, so
+# merging one triggers this redeploy. Merging any other PR does not — a code
+# change ships on the next manual redeploy, by design.
+#
+# What it does mirrors the manual README procedure exactly:
+#   1. fly deploy --build-only --push  -> build + push a new registry image, no release
+#      (this app has never had a `fly deploy` release; a release can normalize the
+#      machine against fly.toml, which carries no schedule).
+#   2. find the scheduled machine (config.schedule == "daily").
+#   3. fly machine update --image ... --vm-memory 1024  -> swap the image IN PLACE.
+#      Never destroy/recreate: a fresh --schedule machine re-anchors its daily fire
+#      ~24h out and would skip the next run. The in-place swap preserves the
+#      schedule and restart policy; --vm-memory 1024 is mandatory because
+#      `fly machine` ignores fly.toml's [[vm]] block and 256MB hangs the Agent
+#      SDK's bundled CLI on `initialize`.
+#
+# Setup this workflow assumes (see TODO.md):
+#   - repo secret FLY_API_TOKEN — a Fly deploy token (`fly tokens create deploy`),
+#     scoped to this one app; it is the only credential this workflow needs.
+#   - the app already exists with one scheduled (`daily`) machine (README step 4).
+# The billed account creation and `fly secrets set` remain manual (README) — this
+# workflow only rebuilds the image and moves the existing machine onto it.
+name: Deploy search cron on refine merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+# One redeploy at a time; never cancel a swap mid-flight.
+concurrency:
+  group: fly-cron-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only when a refinement PR (refine/ground-truth-*) is actually MERGED —
+    # never on a plain close, and never for any other branch.
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'refine/')
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Check out the post-merge base branch
+        uses: actions/checkout@v4
+        with:
+          # Build from the base branch (main now carries the merged prompt), not
+          # the PR's merge ref. The build context is the working directory.
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Build and push a new image (no release)
+        id: build
+        run: |
+          set -euo pipefail
+          app=$(awk -F"'" '/^app = /{print $2}' fly.toml)
+          if [ -z "$app" ]; then
+            echo "::error::Could not read app name from fly.toml" >&2
+            exit 1
+          fi
+          label="refine-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
+          image="registry.fly.io/${app}:${label}"
+          echo "Building and pushing $image"
+          flyctl deploy --build-only --push --image-label "$label"
+          {
+            echo "app=$app"
+            echo "image=$image"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Swap the scheduled machine onto the new image
+        env:
+          APP: ${{ steps.build.outputs.app }}
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          # The cron is the machine whose native schedule is `daily`.
+          mapfile -t machines < <(
+            flyctl machine list --app "$APP" --json \
+              | jq -r '.[] | select(.config.schedule == "daily") | .id'
+          )
+          if [ "${#machines[@]}" -eq 0 ]; then
+            echo "::error::No scheduled (daily) machine found for $APP — create one (README step 4) before this workflow can update it." >&2
+            exit 1
+          fi
+          for id in "${machines[@]}"; do
+            echo "Updating machine $id -> $IMAGE"
+            # In-place image swap: keeps schedule + restart policy, only the image
+            # moves. --vm-memory 1024 is mandatory (fly machine ignores fly.toml's
+            # [[vm]] block; 256MB hangs the Agent SDK CLI on `initialize`).
+            flyctl machine update "$id" \
+              --app "$APP" \
+              --image "$IMAGE" \
+              --vm-memory 1024 \
+              --yes
+            # Re-assert the schedule if the update dropped it (README step 4 safety).
+            schedule=$(flyctl machine status "$id" --app "$APP" --json | jq -r '.config.schedule // empty')
+            if [ "$schedule" != "daily" ]; then
+              echo "Schedule came back as '${schedule:-none}'; re-asserting daily."
+              flyctl machine update "$id" --app "$APP" --schedule daily --vm-memory 1024 --yes
+            fi
+            flyctl machine status "$id" --app "$APP"
+          done

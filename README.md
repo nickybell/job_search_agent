@@ -343,6 +343,18 @@ the schedule was dropped, re-assert it without rebuilding:
 creates a release), and a release can normalize the machine against `fly.toml`,
 which carries no schedule.
 
+**Automatic redeploy on a merged refinement PR.** The steps above are the
+general (and recovery) path for any code or prompt change. For the one change
+that happens on a schedule — the weekly ground-truth refinement of
+`deep_research_prompt.md` — the redeploy is automated:
+`.github/workflows/deploy-on-refine-merge.yml` fires when a `refine/ground-truth-*`
+PR merges and runs exactly this procedure (build + push a new image with
+`--build-only --push`, then swap the scheduled machine's image in place with
+`--vm-memory 1024`, re-asserting `daily` if the update drops it). It needs one
+repo secret, `FLY_API_TOKEN` (`fly tokens create deploy`); the billed account
+setup and `fly secrets set` above stay manual. Merging any other PR does not
+redeploy — a code change ships on the next manual run of the steps above.
+
 ## How this was built
 
 This repo is also a worked example of how I build with AI coding tools.

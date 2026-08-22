@@ -287,6 +287,8 @@ The search prompt is refined from Step 3's accumulated ground truth by an **auto
 
 **Runtime.** The refiner needs a repo checkout and the ability to open a PR — none of which the Fly search image has — so it runs as a scheduled GitHub Actions workflow (weekly), with the Turso and Anthropic credentials as repository secrets. The Fly cron keeps Steps 1–2; this loop is deliberately a separate runtime shaped around the PR.
 
+**Merging closes the loop back to Fly.** A merged refinement PR only changes the prompt in the repo — the running Fly cron is pinned to the image it was built with, so the new prompt is inert until a new image is built and the machine is moved onto it. A second GitHub Actions workflow (`deploy-on-refine-merge.yml`) automates exactly that on the merge of a `refine/ground-truth-*` PR: it runs the manual redeploy procedure (build + push a new registry image with no release, then swap the scheduled machine's image *in place* with the mandatory `--vm-memory 1024`, never destroy-and-recreate — a fresh scheduled machine re-anchors its daily fire ~24h out and would skip a run). It needs only a Fly deploy token (`FLY_API_TOKEN` repo secret); the billed account creation and `fly secrets set` stay manual. This is the one automated redeploy — an ordinary code change still ships on the next manual redeploy — because the refinement loop is the one code path that edits the baked-in prompt on a schedule.
+
 ## Architecture
 
 The system is split between a headless cloud runtime and interactive local sessions, coordinated through a single hosted database.
