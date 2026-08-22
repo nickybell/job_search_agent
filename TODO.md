@@ -76,6 +76,11 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
 - [ ] **Review the new/updated tests** (`test_packet.py`, refetch scope tests,
   tracker A:H tests) — same standing rule as the suite below: agent-authored
   tests are provisional until you've read them.
+- [ ] **Review the Step 4 tests** (`test_generate.py`, `test_docx_patch.py`,
+  and the rewritten packet-rebuild section of `test_refetch.py`) — the same
+  standing rule. All stubs (tailor callable, soffice, gws) are hermetic; the
+  first *real* `jsa generate` run (live model call, real LibreOffice render,
+  real Sheet append) is the verification that matters and hasn't happened yet.
 
 ## Added 2026-08-21 (Step 4 → `jsa generate`)
 
@@ -88,22 +93,19 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   `jsa track --id` as its final action. Runs headless with a pinned model and
   effort and no inherited session state (like the search runners), so it can be
   detached rather than watched. Stays local — inputs (`base_resume.docx`),
-  outputs, and the `gws` grant are all local. **Still unbuilt:** the tailoring
-  instructions are TK, so `jsa generate` is specified, not yet implemented.
+  outputs, and the `gws` grant are all local. **Implemented 2026-08-21**
+  (`src/jsa/generate.py` + `src/jsa/docx_patch.py`); `tailoring_prompt.md` is
+  a committed placeholder (conservative guidance, load-bearing output
+  contract) until the real tailoring instructions are written.
 
-- [ ] **Reconcile the mkdir-as-guard framing with the new idempotency model.**
-  `prd.md` now says the completion guard is `added_to_tracker` — a directory
-  without a completed, tracked resume is *resumable work*, not a done job.
-  This fixes a real bug: `refetch._apply_packet_rebuild` leaves a bare
-  directory (no resume, by design), and under the old "directory exists ⇒
-  skip" rule `jsa generate` would strand it forever. The **CLAUDE.md** pass is
-  done (the `jsa packet` and refetch bullets now carry the revised rule;
-  `packet.py`'s standalone fail-if-exists `mkdir` is *retained by design* as a
-  cheap safety on that path). Remaining, landing with the `jsa generate`
-  implementation: generate's packet step must re-enter an existing bare
-  directory instead of aborting, and `refetch.py`'s `_apply_packet_rebuild`
-  must invoke `jsa generate` to regenerate the resume (today it stops at the
-  bare rebuild) and build-new-before-deleting-old for rename safety.
+- **[Resolved 2026-08-21] The mkdir-as-guard framing is reconciled with the
+  `added_to_tracker` idempotency model.** CLAUDE.md, `packet.py`'s docstrings,
+  and `test_packet.py` carry the revised rule (the standalone fail-if-exists
+  `mkdir` is retained by design as a cheap safety on that path only);
+  `jsa generate` re-enters an existing bare directory and completes it; and
+  `refetch._apply_packet_rebuild` now invokes `generate.run_generate` for the
+  drifted row — build-new-before-deleting-old for rename safety, failures
+  flagged for a manual `jsa generate --id`, never a rollback.
 
 - **[Resolved 2026-08-21] Tailoring mechanism: the structured patch.**
   `jsa generate`'s model call returns a JSON patch (paragraph id → replacement
@@ -232,6 +234,12 @@ review loop, the `jsa` CLI, and the Fly.io deployment (Dockerfile + fly.toml).
   (not Keywell). `base_resume.docx` stays gitignored.
 
 ## Empty PRD sections to fill
+
+- [ ] **The tailoring instructions (`tailoring_prompt.md`).** The committed
+  file is a placeholder: conservative guidance (never invent experience,
+  prefer rewording, length-preserving changes) plus the structured-patch
+  output contract, which is load-bearing and must survive the rewrite. The
+  real instructions are TK.
 
 - [~] **Search Prompt Updates from "Ground Truth"** — the *manual* refinement pass
   (translation rules + the first 2026-08-16 round) is now documented in `prd.md`.

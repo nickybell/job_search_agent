@@ -15,6 +15,7 @@ from conftest import make_posting
 
 from jsa import db, refetch
 from jsa.ats.fetch import ATSDetail
+from jsa.generate import GenerateResult, GenerateSummary
 from jsa.tracker import TrackedRow, TrackerError
 
 GREENHOUSE_URL = "https://job-boards.greenhouse.io/acme/jobs/4567"
@@ -62,6 +63,50 @@ def title_updates(monkeypatch) -> list[tuple[int, str]]:
         lambda sheet_id, row_number, title: calls.append((row_number, title)),
     )
     return calls
+
+
+class GenerateStub:
+    """Stands in for jsa generate: builds a minimal packet for the row.
+
+    Mirrors the real contract refetch relies on: reads the (already
+    corrected) DB row, ensures the directory at the *new* name, writes
+    job_posting.md and a resume, and reports generated=1.
+    """
+
+    def __init__(self, packets_root):
+        self.packets_root = packets_root
+        self.calls: list[int | None] = []
+        self.fail = False
+
+    def __call__(self, config, *, posting_id=None, dry_run=False, tailor=None):
+        self.calls.append(posting_id)
+        if self.fail:
+            raise RuntimeError("tailoring blew up")
+        client = db.connect(config)
+        try:
+            rows = db.pending_packets(client, posting_id)
+        finally:
+            client.close()
+        assert rows, "generate stub invoked for an ineligible row"
+        pid, normalized_company, title_slug, company, title, jd = rows[0]
+        path = self.packets_root / f"{normalized_company} - {title_slug}"
+        path.mkdir(parents=True, exist_ok=True)
+        if jd:
+            (path / "job_posting.md").write_text(jd if jd.endswith("\n") else jd + "\n")
+        (path / "resume.docx").write_text("fresh resume")
+        result = GenerateResult(
+            posting_id=int(pid), company=company, title=title, path=path, status="generated"
+        )
+        return GenerateSummary(eligible=1, generated=1), [result]
+
+
+@pytest.fixture(autouse=True)
+def generate_stub(monkeypatch, packets_root) -> GenerateStub:
+    # Autouse so no rebuild path can reach the real jsa generate (a model
+    # call, LibreOffice, and a gws append).
+    stub = GenerateStub(packets_root)
+    monkeypatch.setattr(refetch, "run_generate", stub)
+    return stub
 
 
 @pytest.fixture
@@ -410,28 +455,33 @@ def make_packet(packets_root, slug=OLD_TITLE):
     return path
 
 
-def test_a_changed_job_with_a_packet_gets_it_rebuilt(config, client, stub_fetch, packets_root):
-    # The packet is a derived artifact: when title and JD change, the old
-    # directory (resume included) is deleted and rebuilt — the job no longer
-    # exists as it was packeted, and the missing resume IS the Step 4
-    # regenerate signal.
-    seed(client)
+def test_a_changed_job_with_a_packet_gets_it_rebuilt(
+    config, client, stub_fetch, packets_root, generate_stub
+):
+    # The packet is a derived artifact: when title and JD change, refetch
+    # hands the row to jsa generate, which rebuilds it at the new name (fresh
+    # job_posting.md + regenerated resume); only then is the old-named
+    # directory removed (build-before-delete).
+    posting_id = seed(client)
     old = make_packet(packets_root)
     stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
 
     summary, results = refetch.run_refetch(config)
 
     assert summary.packets_rebuilt == 1
+    assert generate_stub.calls == [posting_id]
     assert not old.exists()
     new = packets_root / f"Acme - {NEW_TITLE}"
     assert (new / "job_posting.md").read_text() == "the revised JD\n"
-    assert not (new / "resume.docx").exists()
+    assert (new / "resume.docx").read_text() == "fresh resume"
     assert "rebuilt" in refetch.describe(results[0])
 
 
-def test_a_description_only_change_rebuilds_at_the_same_path(
-    config, client, stub_fetch, packets_root
+def test_a_description_only_change_regenerates_in_place(
+    config, client, stub_fetch, packets_root, generate_stub
 ):
+    # Same path (the slug held), so there is nothing to delete afterwards:
+    # generate re-enters the directory and regenerates its contents.
     seed(client)
     old = make_packet(packets_root)
     stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=OLD_TITLE))
@@ -441,11 +491,11 @@ def test_a_description_only_change_rebuilds_at_the_same_path(
     assert results[0].changed_fields == ["description"]
     assert summary.packets_rebuilt == 1
     assert (old / "job_posting.md").read_text() == "the revised JD\n"
-    assert not (old / "resume.docx").exists()  # stale resume cleared for regen
+    assert (old / "resume.docx").read_text() == "fresh resume"  # stale resume regenerated
 
 
 def test_a_location_only_change_leaves_the_packet_untouched(
-    config, client, stub_fetch, packets_root
+    config, client, stub_fetch, packets_root, generate_stub
 ):
     # The packet contains no location, so nothing in it is stale.
     seed(client)
@@ -456,25 +506,28 @@ def test_a_location_only_change_leaves_the_packet_untouched(
 
     assert results[0].changed_fields == ["location"]
     assert summary.packets_rebuilt == 0
-    assert (old / "resume.docx").exists()
+    assert generate_stub.calls == []
+    assert (old / "resume.docx").read_text() == "stale resume"
 
 
 def test_a_change_without_a_packet_directory_touches_no_disk(
-    config, client, stub_fetch, packets_root
+    config, client, stub_fetch, packets_root, generate_stub
 ):
     # Rebuild only refreshes an existing packet; it never creates one from
-    # scratch — that is jsa packet's job, on its own eligibility rules.
+    # scratch — that is jsa packet's / jsa generate's job, on their own
+    # eligibility rules.
     seed(client)
     stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
 
     summary, _ = refetch.run_refetch(config)
 
     assert summary.packets_rebuilt == 0
+    assert generate_stub.calls == []
     assert not (packets_root / f"Acme - {NEW_TITLE}").exists()
 
 
 def test_dry_run_reports_the_pending_rebuild_without_touching_disk(
-    config, client, stub_fetch, packets_root
+    config, client, stub_fetch, packets_root, generate_stub
 ):
     seed(client)
     old = make_packet(packets_root)
@@ -483,12 +536,13 @@ def test_dry_run_reports_the_pending_rebuild_without_touching_disk(
     summary, results = refetch.run_refetch(config, dry_run=True)
 
     assert summary.packets_rebuilt == 1
+    assert generate_stub.calls == []
     assert (old / "resume.docx").exists()
     assert "would be rebuilt" in refetch.describe(results[0])
 
 
 def test_rebuild_refuses_to_clobber_a_distinct_directory_at_the_new_name(
-    config, client, stub_fetch, packets_root
+    config, client, stub_fetch, packets_root, generate_stub
 ):
     seed(client)
     old = make_packet(packets_root)
@@ -498,8 +552,29 @@ def test_rebuild_refuses_to_clobber_a_distinct_directory_at_the_new_name(
     summary, results = refetch.run_refetch(config)
 
     assert summary.packets_rebuilt == 0
+    assert generate_stub.calls == []  # the guard fires before generate is invoked
     assert (old / "resume.docx").exists()  # nothing deleted
     assert results[0].packet_error
+    assert "NOT rebuilt" in refetch.describe(results[0])
+
+
+def test_a_failed_generate_is_flagged_and_never_deletes_the_old_packet(
+    config, client, stub_fetch, packets_root, generate_stub
+):
+    # Build-before-delete: a failed regeneration on a rename leaves the
+    # previous packet intact, flagged for a manual re-run — never a rollback
+    # (the DB keeps the corrected title either way).
+    posting_id = seed(client)
+    old = make_packet(packets_root)
+    generate_stub.fail = True
+    stub_fetch(ATSDetail(jd_markdown="the revised JD", location=None, title=NEW_TITLE))
+
+    summary, results = refetch.run_refetch(config)
+
+    assert summary.packets_rebuilt == 0
+    assert (old / "resume.docx").read_text() == "stale resume"  # nothing deleted
+    assert f"jsa generate --id {posting_id}" in results[0].packet_error
+    assert row(client, posting_id)["title"] == NEW_TITLE  # the DB write stands
     assert "NOT rebuilt" in refetch.describe(results[0])
 
 
