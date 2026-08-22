@@ -17,15 +17,6 @@ reasoning live in `prd.md`; what happened lives in the git log.
 
 ## One-time setup
 
-- [X] **Wire up the refinement workflow on GitHub.** Add the repo secrets
-  `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `ANTHROPIC_API_KEY` (the
-  rotated values, never the leaked ones); enable Settings → Actions → "Allow
-  GitHub Actions to create and approve pull requests"; adjust the cron in
-  `.github/workflows/refine-search-prompt.yml` if Sunday 13:00 UTC isn't the
-  slot you want. Smoke-test from the Actions tab via workflow_dispatch — the
-  first-ever run picks up every already-decided posting (including rows
-  decided before `decided_at` existed), so it exercises the loop immediately;
-  it only exits quietly on a *second* run with nothing newly decided since.
 - [ ] **Publish the OAuth consent screen** in the `job-search-agent-502402`
   GCP project ("In production") so the `gws` refresh token stops expiring
   every 7 days. Until then, `gws auth login` is the fix whenever a command
@@ -51,8 +42,3 @@ reasoning live in `prd.md`; what happened lives in the git log.
 - [ ] **Publish the repo** as a public portfolio piece on your personal
   GitHub account (not Keywell) — after the credential rotation above.
   `base_resume.docx` and `resume_templates/` stay gitignored.
-- [ ] **Lift the pure tailoring step to Fly.** Only the text-in /
-  revisions-out tailoring is cloud-shaped; the packet, `.docx`/`.pdf`
-  production, and the `gws` write stay local. Not needed for the app to work
-  — filed for the DevOps-practice value. See "Why Step 4 is local" in
-  `prd.md`.
