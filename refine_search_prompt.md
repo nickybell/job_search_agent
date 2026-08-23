@@ -30,9 +30,15 @@ already incorporated this history.
 Read `deep_research_prompt.md` in full, and the sections of `prd.md` that
 describe the search criteria (Daily Search; the signals and exclusions).
 Treat the current prompt's existing rules as settled unless the new ground
-truth contradicts them — you are proposing a **minimal diff**, not a rewrite.
+truth contradicts them or the adherence audit below shows them being
+ignored — you are proposing a **minimal diff**, not a rewrite.
 
 ## How to translate ground truth into edits
+
+The measure of success is the precision of the surfaced set, not rule
+coverage. That a skip reason is already encoded in the prompt is never by
+itself evidence the prompt is working — it is the starting point for asking
+why the posting was surfaced anyway (see the adherence audit below).
 
 - **Explicit directives in feedback become hard exclusions.** Where the
   user's feedback literally instructs a search change (e.g. "we should
@@ -45,11 +51,18 @@ truth contradicts them — you are proposing a **minimal diff**, not a rewrite.
   (deprioritize, never exclude) or sharpened target language.** The prompt's
   design principle holds: borderline fit is the user's call in review, not
   the search agent's.
+- **A negative signal that never yields an Apply earns promotion.** When a
+  negative-signal category has recurred across rounds (confirm against the
+  historical reference) with zero Applies, propose promoting it to a hard
+  exclusion — or, where it is posting-verifiable, a filter — and flag the
+  promotion prominently in the PR body. This is the one sanctioned trade of
+  recall for precision, and the human PR review is its guard: a wrong
+  promotion costs one rejected PR, not silent lost recall.
 - **One-off judgment calls stay out of the prompt entirely.** A single
   observation or a role-specific critique is review-time judgment working as
   designed, not a search defect.
 
-## Two analyses beyond the explicit feedback
+## Three analyses beyond the explicit feedback
 
 1. **Manual adds are recall failures — analyze each one.** For every
    `search_agent: manual` posting above, judge whether the prompt as written
@@ -67,6 +80,19 @@ truth contradicts them — you are proposing a **minimal diff**, not a rewrite.
    separate the two piles. Encode only patterns that recur (confirm against
    the historical reference), and only as negative signals or sharpened
    positive language — never as hard exclusions.
+3. **Audit adherence, not just coverage.** Classify every Skip in scope:
+   (a) covered by no existing rule — a coverage gap, fixable under the
+   taxonomy above; (b) covered by a negative signal — expected under
+   recall-first, but tally it, because those tallies are the evidence the
+   promotion rule above runs on; (c) in violation of a hard filter or hard
+   exclusion — an adherence failure by the search agent, never "working as
+   designed." For (c) the fix is salience, not redundancy: reposition,
+   restate, or consolidate the ignored rule, or add a pre-emit self-check
+   instruction to the search prompt — and where no wording change can
+   plausibly help, propose runner-side enforcement as a `TODO.md` checkbox
+   instead. One caveat: a row may have been decided under an older version
+   of the prompt that predated the rule it seems to violate — weigh that
+   before calling it an adherence failure.
 
 ## Guardrails (do not violate)
 
@@ -82,7 +108,9 @@ truth contradicts them — you are proposing a **minimal diff**, not a rewrite.
   `deep_research_prompt.md` — it must read as a self-contained brief.
 - **Preserve the recall-first stance for fit.** Every edit should reduce
   wasted review time without creating false negatives on roles the user
-  would actually want.
+  would actually want. The one sanctioned trade is an evidence-backed
+  promotion (above), which must be flagged prominently in the PR body for
+  the human to veto.
 - **Never run `jsa search`** or anything else that spends API budget.
 
 ## Deliverables
@@ -94,7 +122,9 @@ truth contradicts them — you are proposing a **minimal diff**, not a rewrite.
    reasoning. (Also where unsupported-ATS recall evidence accumulates.)
 4. **Your final message = the PR body.** In it: a changelog of every edit
    with the ground truth that motivated it; the manual-adds recall analysis;
-   any implicit patterns you found, encoded or not; and open questions where
+   the adherence audit and its tallies; any implicit patterns you found,
+   encoded or not; any promotion you are proposing, prominently flagged;
+   and open questions where
    you saw genuine contradictions (an interactive session would have asked —
    the PR body is where you ask instead). If you changed nothing, say so and
    why. Never describe an edit you did not actually make.
