@@ -52,6 +52,16 @@ reasoning live in `prd.md`; what happened lives in the git log.
 
 ## Later / optional
 
+- [ ] **Give the refiner the data its adherence audit's version caveat
+  needs.** The audit asks the refiner to weigh whether a row was decided
+  under a prompt version that predated the rule it seems to violate, but the
+  rendered ground truth carries no found-date and the agent has no git
+  access — so today that judgment is a guess. Fix is small: include each
+  row's `first_seen`/created date in `refine.py`'s ground-truth rendering
+  (and possibly the prompt's recent edit dates in the refine template's
+  interpolation). Deferred from the adherence-audit revision — prompt edits
+  shipped first.
+
 - [ ] **Publish the repo** as a public portfolio piece on your personal
   GitHub account (not ***REMOVED***) — after the credential rotation above.
   `base_resume.docx` and `resume_templates/` stay gitignored.
