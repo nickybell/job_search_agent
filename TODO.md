@@ -50,6 +50,25 @@ reasoning live in `prd.md`; what happened lives in the git log.
   `JSA_PACKETS_DIR`, `JSA_RESUME_TEMPLATES_DIR`, and the injectable
   `tailor`/`runner` callables in `generate.py`/`refine.py`.
 
+## Search recall — unsupported-platform evidence
+
+Manual adds the search could not have emitted because the posting lives off
+the four supported ATS platforms. Accumulates as evidence for the four-ATS
+table's additive escape hatch (see `prd.md` Daily Search); not a prompt
+defect, so never encoded as a prompt edit.
+
+- [ ] **Agave — Customer Solutions Engineer** (id 48, manual add, decided
+  Apply). Supplied URL is a Y Combinator jobs-board page
+  (`ycombinator.com/companies/agave/jobs/…`), not Greenhouse / Lever / Ashby /
+  Rippling, so it is out of scope for the search by construction. If YC-hosted
+  startup listings keep recurring as misses, check whether YC's board exposes
+  a usable public JSON list endpoint worth adding to the ATS table. (Secondary,
+  unencoded: "Customer Solutions Engineer" is an implementation/CS/solutions
+  hybrid — the JD explicitly states no technical skills required — and is not
+  one of the seeded target titles. Left unencoded to avoid pulling in the
+  technical solutions/field-engineer roles the user consistently skips, e.g.
+  MinIO id 32.)
+
 ## Later / optional
 
 - [ ] **Publish the repo** as a public portfolio piece on your personal
