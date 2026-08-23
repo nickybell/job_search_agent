@@ -100,11 +100,30 @@ jobs:
             # In-place image swap: keeps schedule + restart policy, only the image
             # moves. --vm-memory 1024 is mandatory (fly machine ignores fly.toml's
             # [[vm]] block; 256MB hangs the Agent SDK CLI on `initialize`).
-            flyctl machine update "$id" \
+            #
+            # Retry on failure: Fly's registry control plane can lag a few
+            # seconds behind a push it just acknowledged, so the update's own
+            # manifest read 404s (MANIFEST_UNKNOWN) even though the image is
+            # already there — a known Fly registry propagation race, not
+            # something wrong with the image or this command. Fly's own
+            # guidance for this error is to retry.
+            attempt=1
+            max_attempts=5
+            until flyctl machine update "$id" \
               --app "$APP" \
               --image "$IMAGE" \
               --vm-memory 1024 \
               --yes
+            do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::error::flyctl machine update failed after $max_attempts attempts (likely Fly registry propagation lag) — giving up." >&2
+                exit 1
+              fi
+              delay=$((attempt * 5))
+              echo "machine update failed (attempt $attempt/$max_attempts) — probably registry propagation lag; retrying in ${delay}s..."
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
             # Re-assert the schedule if the update dropped it (README step 4 safety).
             schedule=$(flyctl machine status "$id" --app "$APP" --json | jq -r '.config.schedule // empty')
             if [ "$schedule" != "daily" ]; then
