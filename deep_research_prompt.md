@@ -16,7 +16,7 @@ Seed your searches with the titles below and their obvious variants (British/Ame
 - **Customer Enablement** -- Head / Manager / Director / VP of Customer Enablement
 - **Customer Education** -- Head / Manager / Director / VP of Customer Education
 - **AI Enablement / AI Adoption** -- Head / Manager / Director / VP of AI Enablement, AI Adoption, AI Transformation, or AI Training / Upskilling / Literacy / Fluency. Internal, employee-facing charters (enabling a company's own workforce on AI) are just as in-scope as customer-facing ones -- treat them as a primary target, not an adjacency.
-- **Customer Experience** -- Head / Manager / Director / VP of Customer Experience (CX)
+- **Customer Experience** -- Head / Manager / Director / VP of Customer Experience (CX). In scope, but a narrower target than the categories above: CX titles disproportionately resolve either to support-/contact-center *operations* (deflection, CSAT, SLA, staffing, escalations) or to executive CX-*strategy* mandates, both weak fits (see Negative signals). Keep seeding the search with the title, but weight verification toward postings whose body centers driving product adoption and customer outcomes over running a support organization.
 - **Adjacent / commonly-blended** -- Head of Academy / Head of [Company] University; Customer Education; Learning & Development (customer-facing / senior)
 
 ## Non-negotiable filters
