@@ -125,7 +125,10 @@ jobs:
               attempt=$((attempt + 1))
             done
             # Re-assert the schedule if the update dropped it (README step 4 safety).
-            schedule=$(flyctl machine status "$id" --app "$APP" --json | jq -r '.config.schedule // empty')
+            # `flyctl machine status` has no --json flag (only -d/--display-config,
+            # which dumps the machine's own config, not this shape) -- `machine
+            # list --json` is the only subcommand here that emits JSON, so reuse it.
+            schedule=$(flyctl machine list --app "$APP" --json | jq -r --arg id "$id" '.[] | select(.id == $id) | .config.schedule // empty')
             if [ "$schedule" != "daily" ]; then
               echo "Schedule came back as '${schedule:-none}'; re-asserting daily."
               flyctl machine update "$id" --app "$APP" --schedule daily --vm-memory 1024 --yes
