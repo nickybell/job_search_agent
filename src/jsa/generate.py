@@ -47,7 +47,7 @@ import subprocess
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -57,14 +57,18 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ResultMessage,
     TextBlock,
+    create_sdk_mcp_server,
     query,
+    tool,
 )
 from docx import Document
+from pypdf import PdfReader
 
 from . import db
 from .config import Config
 from .docx_patch import (
     PatchError,
+    TailoringPatch,
     apply_patch,
     parse_patch,
     render_changelog,
@@ -80,11 +84,20 @@ MODEL = "claude-opus-4-8"
 _PROMPT_FILENAME = "tailoring_prompt.md"
 _DEFAULT_WORKERS = 3
 _SOFFICE_TIMEOUT = 180
+_PAGE_BUDGET = 2
+# Turn headroom for the tailoring loop: a patch, a render, and several rounds
+# of trimming to hit the page budget — with slack for retries on a bad patch.
+_MAX_TAILOR_TURNS = 40
 
-# The tailoring step as an injectable callable (prompt -> raw model output), so
-# tests — and any future alternative backend — swap the model without touching
-# the surrounding file work.
-TailorFn = Callable[[str], str]
+# The tailoring step as an injectable callable. It receives the filled prompt
+# and an ``apply_render`` callable (patch JSON string -> a render report dict)
+# and drives however it likes — the default wires apply_render into an
+# in-process SDK tool and lets the model iterate to the page budget; a test can
+# swap in a callable that invokes apply_render once with a canned patch. It
+# records the final render on the shared ``_RenderState`` apply_render writes
+# to, so its return value is only for logging.
+ApplyRenderFn = Callable[[str], dict]
+TailorFn = Callable[[str, ApplyRenderFn], str]
 
 
 class GenerateError(RuntimeError):
@@ -195,13 +208,74 @@ def load_tailoring_prompt(
     )
 
 
-async def _query_model(prompt: str) -> str:
+def extract_pdf_pages(pdf_path: Path) -> list[str]:
+    """The rendered PDF's text, one string per page — the render loop's feedback."""
+    reader = PdfReader(str(pdf_path))
+    return [(page.extract_text() or "").strip() for page in reader.pages]
+
+
+def _format_render_report(report: dict) -> str:
+    """Render one ``render_resume`` result into the text the model reads back."""
+    verdict = (
+        "OK — within the two-page budget"
+        if report["within_budget"]
+        else f"EXCEEDS the two-page limit ({report['page_count']} pages)"
+    )
+    lines = [f"Rendered to {report['page_count']} page(s). Budget: {verdict}."]
+    for i, text in enumerate(report["pages"], start=1):
+        lines.append(f"\n----- PAGE {i} (rendered text) -----\n{text or '(empty)'}")
+    if not report["within_budget"]:
+        lines.append(
+            "\nThe resume must fit two pages. Tighten wording and cut or fold the "
+            "lowest-value bullets, then call render_resume again."
+        )
+    return "\n".join(lines)
+
+
+async def _run_tailoring_agent(prompt: str, apply_render: ApplyRenderFn) -> str:
+    """Drive the tailoring model with a render tool until the resume settles.
+
+    The model submits a JSON patch to ``render_resume``; the tool applies it to
+    a fresh copy of the chosen template, renders the PDF, and reports the page
+    count and each page's text. The model iterates until the resume fits the
+    two-page budget with no orphaned role headers. The last successful render
+    is the final resume — ``apply_render`` records its patch on the shared
+    render state the caller reads afterward.
+    """
+
+    @tool(
+        "render_resume",
+        "Apply your JSON patch to the chosen template, render it to PDF, and "
+        "report the page count and each page's rendered text. Call this to "
+        "check your work against the two-page budget and revise until it fits.",
+        {"patch": str},
+    )
+    async def render_resume(args: dict) -> dict:
+        try:
+            report = apply_render(args["patch"])
+        except PatchError as exc:
+            return {
+                "content": [
+                    {"type": "text", "text": f"PATCH NOT APPLIED — {exc}. Fix it and retry."}
+                ],
+                "is_error": True,
+            }
+        except Exception as exc:  # a render/infra failure, not the model's fault
+            return {
+                "content": [
+                    {"type": "text", "text": f"RENDER FAILED — {type(exc).__name__}: {exc}"}
+                ],
+                "is_error": True,
+            }
+        return {"content": [{"type": "text", "text": _format_render_report(report)}]}
+
+    server = create_sdk_mcp_server("resume", tools=[render_resume])
     options = ClaudeAgentOptions(
         model=MODEL,
-        # A pure text→JSON pass: no tools, one turn, nothing interactive.
-        allowed_tools=[],
+        mcp_servers={"resume": server},
+        allowed_tools=["mcp__resume__render_resume"],
         permission_mode="bypassPermissions",
-        max_turns=1,
+        max_turns=_MAX_TAILOR_TURNS,
     )
     final_text = ""
     assistant_text: list[str] = []
@@ -218,9 +292,9 @@ async def _query_model(prompt: str) -> str:
     return final_text or "\n".join(assistant_text)
 
 
-def run_tailoring_model(prompt: str) -> str:
-    """One headless SDK call, pinned model, no inherited session state."""
-    return anyio.run(_query_model, prompt)
+def run_tailoring_model(prompt: str, apply_render: ApplyRenderFn) -> str:
+    """Default tailor: the render-loop agent, pinned model, no session state."""
+    return anyio.run(_run_tailoring_agent, prompt, apply_render)
 
 
 def render_pdf(docx_path: Path) -> Path:
@@ -252,6 +326,56 @@ def render_pdf(docx_path: Path) -> Path:
 
 
 @dataclass
+class _RenderState:
+    """The last successful render, written by ``apply_render`` for the caller.
+
+    The tailoring loop runs inside the model's tool calls; this is how the
+    final patch, its applied changes, and the resulting page count come back
+    out — to build the changelog and flag an over-budget result.
+    """
+
+    patch: TailoringPatch | None = None
+    applied: list = field(default_factory=list)
+    page_count: int = 0
+    rendered: bool = False
+
+
+def _make_apply_render(
+    templates: dict[str, Path], docx_path: Path, state: _RenderState
+) -> ApplyRenderFn:
+    """Build the deterministic apply+render step bound to one row's context.
+
+    Each call parses a patch, applies it to a fresh copy of the model-chosen
+    template, saves the ``.docx``, renders the PDF, and returns the page count
+    and per-page text. It records the applied patch on ``state`` so the last
+    call the model makes is the render the packet keeps.
+    """
+
+    def apply_render(patch_raw: str) -> dict:
+        patch = parse_patch(patch_raw)
+        if patch.base not in templates:
+            raise PatchError(
+                f"the patch names unknown template {patch.base!r} (library: {', '.join(templates)})"
+            )
+        document = Document(str(templates[patch.base]))
+        applied = apply_patch(document, patch)
+        document.save(str(docx_path))
+        pdf_path = render_pdf(docx_path)
+        pages = extract_pdf_pages(pdf_path)
+        state.patch = patch
+        state.applied = applied
+        state.page_count = len(pages)
+        state.rendered = True
+        return {
+            "page_count": len(pages),
+            "within_budget": len(pages) <= _PAGE_BUDGET,
+            "pages": pages,
+        }
+
+    return apply_render
+
+
+@dataclass
 class GenerateResult:
     """What happened (or would happen) for one queued posting."""
 
@@ -265,6 +389,8 @@ class GenerateResult:
     base: str | None = None  # the template the model chose
     new_template: str | None = None  # slug of a template this run seeded, if any
     changes: int = 0
+    page_count: int = 0  # pages in the final render
+    budget_ok: bool = True  # the final render fit the two-page budget
     tracked: bool = False  # appended to the Sheet in this run
     already_tracked: bool = False  # the closing track call no-opped (already there)
     track_error: str | None = None
@@ -415,9 +541,11 @@ def _generate_one(
             result.status = "skipped_no_jd"
             return result
 
-        # 2. The one-shot tailoring pass: every template's numbered text in,
-        # a template pick plus a structured patch out, the patch applied
-        # deterministically to a fresh copy of the chosen template.
+        # 2. The tailoring loop: every template's numbered text plus the JD go
+        # in; the model submits a structured patch to the render tool, reads
+        # back the page count, and iterates until the resume fits the two-page
+        # budget. ``apply_render`` does the deterministic apply + PDF render on
+        # each call and records the last one on ``state``.
         prompt = load_tailoring_prompt(
             title=title,
             company=company,
@@ -425,23 +553,24 @@ def _generate_one(
             templates_text=templates_text,
             path=prompt_path,
         )
+        stem = resume_file_stem(normalized_company, title_slug)
+        docx_path = directory / f"{stem}.docx"
+        state = _RenderState()
+        apply_render = _make_apply_render(templates, docx_path, state)
         log.info(
             "[id %d] tailoring resume for %s — %s (%s)", result.posting_id, company, title, MODEL
         )
-        patch = parse_patch(tailor(prompt))
-        if patch.base not in templates:
-            raise PatchError(
-                f"the patch names unknown template {patch.base!r} (library: {', '.join(templates)})"
+        tailor(prompt, apply_render)
+        if not state.rendered or state.patch is None:
+            raise GenerateError(
+                "the tailoring agent produced no rendered resume (no valid patch was applied)"
             )
+        patch = state.patch
+        applied = state.applied
         result.base = patch.base
-        document = Document(str(templates[patch.base]))
-        applied = apply_patch(document, patch)
         result.changes = len(applied)
-
-        stem = resume_file_stem(normalized_company, title_slug)
-        docx_path = directory / f"{stem}.docx"
-        document.save(str(docx_path))
-        render_pdf(docx_path)
+        result.page_count = state.page_count
+        result.budget_ok = state.page_count <= _PAGE_BUDGET
 
         # 3. The outward-expansion rule, then the changelog rendered from the
         # applied patch (which flags any new template for the curation scrub).
@@ -533,6 +662,11 @@ def describe(result: GenerateResult) -> str:
         f"  ✓ {label}: resume tailored ({result.changes} change(s), base: {result.base})",
         f"      {result.path}",
     ]
+    if not result.budget_ok:
+        lines.append(
+            f"      WARNING: rendered to {result.page_count} pages — exceeds the 2-page "
+            "budget; review before sending"
+        )
     if result.new_template:
         lines.append(
             f"      NEW template saved: resume_templates/{result.new_template}.docx — "
