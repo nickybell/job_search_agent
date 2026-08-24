@@ -7,17 +7,19 @@ You are a deep research agent. You are tasked with conducting a wide search for 
 
 ## Candidate
 
-Nicky Bell is a Ph.D.-educated enablement, product, and analytics leader based in Washington, DC, targeting Customer Enablement, Customer Education, and AI Enablement leadership roles. His operating thesis: products win when customers change how they work, and AI should be deployed to create 10x humans rather than replace them -- adoption stalls are behavior and identity problems, not feature problems. He is strongest where technical depth meets pedagogy -- translating complex AI/data products into learning that changes what people can do. He has designed curricula and courses at the strategy level, trained 500+ operators on judgment in AI-assisted analysis, led the data science behind a first-of-its-kind FDA approval, deployed internal AI agents, and is fluent in agentic AI and LLM tooling. Target seniority is Manager through VP / Head-of.
+Nicky Bell is a Ph.D.-educated enablement, product, and analytics leader based in Washington, DC, targeting Customer Enablement, Customer Education, Customer Success Operations, and AI Enablement roles. He is strongest where technical depth meets pedagogy -- translating complex AI/data products into learning that changes what people can do.
+
+13+ years of professional experience, almost entirely at small and early-stage organizations where he owned a function end-to-end rather than a slice of one -- not a long-tenured specialist at one large company. Concrete track record: built a startup's customer education and enablement function from zero (webinars, video learning, knowledge assets) while growing revenue 40%+ through account health, renewal strategy, and expansion; was the founding data-science hire at an FDA-regulated medical device company, authoring the statistical report behind a first-of-its-kind FDA clearance and advising the CEO through a $40M+ Series B raise (one promotion, Associate Director to Director, in that role); designed and taught a data science course to 175+ first-time learners and an R programming course to 150+ business professionals; and has personally trained 500+ operators on AI-assisted judgment through his own courses. He builds and ships AI agents himself -- prompt engineering, agentic workflows, Claude Code, Claude Skills, MCP -- rather than only teaching about them, and is comfortable with Python, R, SQL, Snowflake, and Databricks. He has never been a software engineer, though: roles that require solutions-architect or field-engineer-grade technical depth are out of reach even when the title says "education" or "enablement."
 
 ## Target roles and titles
 
 Seed your searches with the titles below and their obvious variants (British/American spelling, "Sr."/"Senior" prefixes, singular/plural). Titles combine freely -- treat multi-hyphenate and blended roles (e.g. "Customer Education & Enablement," "AI Enablement & Change Management") as in-scope.
 
-- **Customer Enablement** -- Head / Manager / Director / VP of Customer Enablement
-- **Customer Education** -- Head / Manager / Director / VP of Customer Education
-- **AI Enablement / AI Adoption** -- Head / Manager / Director / VP of AI Enablement, AI Adoption, AI Transformation, or AI Training / Upskilling / Literacy / Fluency. Internal, employee-facing charters (enabling a company's own workforce on AI) are just as in-scope as customer-facing ones -- treat them as a primary target, not an adjacency.
-- **Customer Experience** -- Head / Manager / Director / VP of Customer Experience (CX). In scope, but a narrower target than the categories above: CX titles disproportionately resolve either to support-/contact-center *operations* (deflection, CSAT, SLA, staffing, escalations) or to executive CX-*strategy* mandates, both weak fits (see Negative signals). Keep seeding the search with the title, but weight verification toward postings whose body centers driving product adoption and customer outcomes over running a support organization.
-- **Adjacent / commonly-blended** -- Head of Academy / Head of [Company] University; Customer Education; Learning & Development (customer-facing / senior)
+- **Customer Enablement** -- Head / Manager / Director / Lead of Customer Enablement
+- **Customer Education/Training** -- Head / Manager / Director / Lead of Customer Education or Customer Training
+- **AI Enablement / AI Adoption** -- Head / Manager / Director / Lead of AI Enablement, AI Adoption, AI Transformation, or AI Training / Upskilling / Literacy / Fluency. Internal, employee-facing charters (enabling a company's own workforce on AI) are just as in-scope as customer-facing ones -- treat them as a primary target, not an adjacency.
+- **Customer Success Operations** -- Head / Manager / Director / Lead of Customer Success Operations, CS Ops, or Client Success Operations. A biz-ops charter *within* the CS function -- process design, health-scoring and segmentation, forecasting, tooling/systems, and operating rhythm for a CS org -- not the CS/account-management seat itself (a plain "Customer Success" or "Customer Success Manager" title is not a seeded target; it skews too support- and retention-focused) and not full-scope Revenue Operations spanning sales, marketing, and CS (a hard exclusion, see "Hard exclusions" below).
+- **Adjacent / commonly-blended** -- Head / Manager / Director of Academy or [Company] University; Head / Manager / Director / Lead of Digital Adoption
 
 ## Non-negotiable filters
 
@@ -26,25 +28,53 @@ Seed your searches with the titles below and their obvious variants (British/Ame
 - **Company type:** Exclude employers whose *core business* is professional / managed services, consulting or systems-integration, staffing / outsourcing, or investing -- a holding company, private-equity firm, or acquirer that runs portfolio companies rather than building its own product (e.g. Cordance). Like Industry, this is a company-level test on the employer's primary business -- read from the JD's "who we are / what we do" front matter, not from the role's content: Nicky wants to work *for a company that builds its own product(s)*. A product company with an incidental services or professional-services arm stays in; only firms whose primary business is services or investment are excluded. When the front matter is genuinely ambiguous about whether the company builds its own product, include it and let review decide.
 - **Salary:** Minimum base salary $150,000. **Apply this only when a range is actually published:** exclude a posting only if its stated range tops out below $150,000. A stated top-of-range below $150,000 is excluded even when the posting hints at flexibility ("may pay more or less than the posted range," equity or bonus upside) -- the *stated* range is what governs. Most postings omit compensation -- a posting with no stated salary is *included*, never dropped for missing comp. (Recall over precision: a borderline or unstated-comp role is Step 3's call, not the search agent's.)
 - **Search window:** Only include postings published or updated within {{SEARCH_WINDOW}}, judged by the recency rules in "Liveness and verifiability" below. When the employer's page and an aggregator disagree about a posting's age, the employer's date wins.
-- **No "Lead" Roles:** Head, Manager, Director, and VP roles are all acceptable for inclusion. The specific terminology "Lead" -- which is typically used in the United States to designate a senior IC role -- should not be included in search results.
+- **Seniority by title:** Head, Manager, Director, and Lead roles are all acceptable for inclusion on equal footing. Exclude one title band outright: VP / SVP / "Vice President" -- ground-truth review shows these are decided Skip essentially every time (too senior, C-suite-adjacent scope in practice), so don't spend search or verification effort surfacing them.
 
 ## Sources
 
-Search the near-universe of sources available to you for *discovery*. Treat each category below as the requirement and the named sites as starting points — if a board is dead or has migrated, find its successor rather than dropping the category.
+Search the near-universe of sources available to you for *discovery*, but **plan your tool calls around the retrieval topology below, not a flat site list.** Each tier names *how* to query the source (the query template) and *how likely a hit resolves to a supported-ATS URL* (its resolution yield). Because only postings resolvable to Greenhouse / Lever / Ashby / Rippling survive (see "Liveness and verifiability"), that yield is what should drive your iteration budget. Treat each tier as the requirement and the named sites as starting points — if a board is dead or has migrated, find its successor rather than dropping the tier.
 
-**Allocate effort by yield, not list order.** Because only postings resolvable to a supported ATS survive (see "Liveness and verifiability"), prefer sources whose listings link directly to supported-ATS URLs; treat sources that host postings natively (LinkedIn-only listings, enterprise boards) as discovery leads requiring ATS resolution, and deprioritize them when the budget is tight.
+**Allocate iterations top-down.** Work Tier 1 before Tier 2, and so on. Do not spend a general web-search pass (a bare LinkedIn or Google sweep) until the ATS-native and ATS-coupled tiers are worked — burning the research budget on native-hosted listings before the deep, pre-resolvable queries run is the primary failure mode this ordering exists to prevent.
 
-At minimum, cover:
+### Tier 1 — Native ATS surface (every hit is already on a verifiable host)
 
-- **Search-engine queries scoped directly to the four supported ATS domains** — the highest-yield source, since every hit is already on a verifiable host: `site:boards.greenhouse.io`, `site:job-boards.greenhouse.io`, `site:jobs.lever.co`, `site:jobs.ashbyhq.com`, and `site:ats.rippling.com`, each combined with the target titles above.
-- **EchoJobs (`echojobs.io`), treated as a peer of the ATS-scoped queries** — unlike consumer aggregators, EchoJobs is scraped from company ATS boards and each listing links out to the *original* ATS posting (Greenhouse/Lever/Ashby/Rippling), so its hits arrive already resolvable to a verifiable host. Query it (`site:echojobs.io` plus the target titles, or its on-site search), then follow each result through to the underlying ATS URL and validate that URL with the list-endpoint check like any other posting. This is high-yield for the same reason the `site:` ATS queries are — the source only ever points at hosts we can verify.
-- ATS-indexing meta-search, which has better freshness and far fewer ghost postings than consumer aggregators: hiring.cafe, Simplify, Jobright, Google Jobs.
-- LinkedIn Jobs.
-- Aggregators and curated boards: Built In (national and DC), Otta / Welcome to the Jungle, Wellfound, The Muse, and the AI-specific boards (ai-jobs.net, Cerebral Valley).
-- Remote-first boards, given the remote location filter: We Work Remotely, Remotive, and Himalayas (better-curated, with real seniority and role-category filters — favor it for senior CX/enablement over raw remote feeds).
-- Niche boards for this space: The Learning Guild; Gain Grow Retain, Customer Success Collective, Sales Enablement Collective.
-- VC and accelerator portfolio boards — high-yield because growth-stage AI companies standing up an education function for the first time often post only there, and their boards link straight through to the underlying ATS posting: a16z, Sequoia, Bessemer, Insight, General Catalyst, First Round, YC. Many run on Getro or Consider, so searching the platform domain hits many funds at once.
-- The current monthly Hacker News “Ask HN: Who is hiring?” thread — high-signal for the same 0-to-1, first-enablement-hire startups the VC boards surface: seed/early-stage companies standing up an education or enablement function post there, and top-level comments routinely link straight to the company's ATS posting, so many hits resolve directly to a supported host. Noisy, so lead with the target titles as in-thread search terms.
+The highest-yield topology: the listing *is* a supported-ATS URL, so no resolution step can fail. Spend the most budget here.
+
+- **Search-engine dorks scoped to the five ATS hosts.** Rotate every seeded title (and its variants) through every host, adding a location term. These queries are cheap and each hit is pre-verified:
+  - `site:boards.greenhouse.io`
+  - `site:job-boards.greenhouse.io`
+  - `site:jobs.lever.co`
+  - `site:jobs.ashbyhq.com`
+  - `site:ats.rippling.com`
+- **Direct ATS board pulls once you hold a token.** Any token/slug/org/board you learn from *any* source unlocks that company's entire open-role index in one unauthenticated GET — far higher yield than re-dorking the same company. None expose a free-text parameter, so **fetch the whole board and filter locally** by title and location:
+  - Greenhouse: `https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` (adds full JDs, departments, offices; each job carries `absolute_url`)
+  - Lever: `https://api.lever.co/v0/postings/{slug}?mode=json` (EU tenants: `api.eu.lever.co`; supports source-side `?location=`/`?team=` filters)
+  - Ashby: `https://api.ashbyhq.com/posting-api/job-board/{org}`
+  - Rippling: `https://ats.rippling.com/api/v2/board/{board}/jobs?page=0&pageSize=50` (paginate; metadata only — descriptions need the per-job detail route)
+  Emit the canonical URL the endpoint returns; this same pull *is* the liveness check (see "How to check the index").
+
+### Tier 2 — ATS-coupled aggregators (built around applying on the company's own ATS)
+
+Listings live off-ATS but route candidates straight through to the underlying ATS posting, so resolution yield is high. For each, query the aggregator, then follow every result to its apply link and keep only Greenhouse/Lever/Ashby/Rippling URLs.
+
+- **VC & accelerator portfolio boards (highest yield in this tier).** Growth-stage AI companies standing up a first enablement hire often post *only* here, and the boards link straight through to the portfolio company's ATS. Most run on one of two platforms, so hitting the platform domain sweeps many funds at once:
+  - **Getro-powered** (`{board}.getro.com/jobs`): aggregated boards like `community.getro.com` and `jobsinvc.getro.com` span many funds; `jobs.techstars.com` is Getro-style. Location/remote filters ride in a single Base64-encoded-JSON `filter` param (e.g. `{"searchable_location_option":["remote"]}`); there is no reliable keyword param, so filter for titles locally.
+  - **Consider-powered** (`consider.com/boards/vc/{firm}/jobs` and white-labeled firm domains): human-readable params — `?remoteOnly=true`, `?locations=Washington`, `?jobTypes=Customer+Success`. Powers Sequoia (`jobs.sequoiacap.com`), Bessemer, Lightspeed, and others.
+  - Named funds to target (verify the live platform per board; most run on Getro or Consider, so the platform sweep above already reaches them — the names just seed the queries): a16z (`portfoliojobs.a16z.com`, `community.getro.com`), Sequoia (`jobs.sequoiacap.com`), Bessemer (`jobs.bvp.com`), Lightspeed (`jobs.lsvp.com`), Insight Partners, General Catalyst, First Round, Index, Greylock, Accel, Khosla, Kleiner Perkins, Battery, NEA, Bain Capital Ventures, USV, Contrary, Pear, Craft, Antler, Initialized, Techstars, YC.
+  - **Weight these funds most heavily — their portfolios are densest in the CS / enablement / education / AI-adoption roles this search targets, so a given board is likelier to carry an in-scope req:** on the B2B-SaaS GTM side, Emergence Capital, Scale Venture Partners, Sapphire Ventures, ICONIQ Growth, Boldstart, and GTMfund; on the AI-native side, Menlo Ventures, Conviction, Radical Ventures, and Amplify Partners.
+- **Curated ATS meta-feeds** that publish ATS URLs directly: `site:trueup.io`, `site:makeprospect.com`, `site:ventureloop.com` (VentureLoop wraps Greenhouse `gh_jid` deep-links) — parse each page for `boards.greenhouse.io` / `job-boards.greenhouse.io` / `jobs.lever.co` / `jobs.ashbyhq.com` links.
+- **Y Combinator Work at a Startup (`workatastartup.com`)** — company pages routinely embed `jobs.lever.co/{slug}` and Greenhouse links; `site:workatastartup.com/jobs` + function keywords, then parse for the embedded ATS URL. (Deep browsing may prompt a login; treat as company discovery and pivot to the company's ATS via a `site:` dork.)
+- **Startups Gallery (`startups.gallery/jobs`)** — every job card shows the company, role title, and a *direct outbound application link*, so it serves two moves without wasting turns: query `site:startups.gallery/jobs "Customer Enablement"` (or fetch the page) to lift the title and outbound ATS URL directly; and when a card surfaces a fitting early-stage company, pivot straight to Tier 1 — dork its ATS host or pull its board API.
+
+### Tier 3 — Curated & remote feeds (mixed hosting; pull the feed, resolve each hit)
+
+On-target for the remote filter and this niche, but hosting is mixed — some listings are ATS-linked, some native. Prefer sources exposing a structured feed you can pull in bulk, then resolve each hit to a supported host.
+
+- **Remote boards with public feeds/APIs:** Himalayas (`himalayas.app/api` — free JSON, filter by keyword/country/seniority/type; companies sync from Ashby/Greenhouse and point applicants back to the ATS — favor it for senior CS/enablement over raw feeds), RemoteOK (`remoteok.com/api`), We Work Remotely (per-category RSS), Remotive.
+- **On-target niche board:** the SaaS Academy Advisors *Customer Education Job Board* (`saasacademyadvisors.com/customer-education-job-board`) — explicitly lists Customer Enablement/Education roles with company names, locations, and links; highly on-target, so resolve every hit.
+- **Startup aggregators:** Startup.jobs (`startup.jobs`) and That Startup Job (`thatstartupjob.com`) — public startup boards that generally link to a company's native careers page or ATS; follow each through and keep only supported-ATS links.
+- **AI-specific boards** (roles skew to Ashby/Greenhouse): ai-jobs.net, aijobs.app.
+- **Structured general boards:** Built In (national, plus the DC path `builtin.com/jobs/washington-dc`; company pages link to Greenhouse — strong for both the remote and greater-DC constraints) and Levels.fyi (a tech comp-and-jobs platform and Greenhouse distribution partner, so listings can carry Greenhouse apply links).
 
 ## Output
 
@@ -125,7 +155,7 @@ None of these is a reason to drop a posting -- borderline calls stay with the do
 - Enablement / education vocabulary fronting a different function -- a title or body that borrows "enable / educate / adoption / literacy" language while the actual charter is: information security / IT / infrastructure (e.g. "AI Enablement & Security" carrying InfoSec or enterprise-IT requirements); data governance or data/AI governance (a functional data-science role); management consulting or professional-services delivery (tells: "consulting experience at Accenture / Deloitte / McKinsey a plus," or a company shifting from a product-led to a services-led motion); partnerships / partner-integrations / channel work; or customer-experience *operations* at scale (owning a support-center network, optimizing deflection / CSAT) as distinct from CX that drives product adoption
 - Engineering-grade technical depth a non-SWE can't credibly claim -- "solutions architect / field architect / technical-sales experience required," curriculum or enablement *engineering* for infrastructure / database / distributed-systems products, or deep DBMS / OLAP / systems prerequisites. Customer Education about a product's real-world use is in scope; SWE-depth technical enablement is not
 - Functional enablement gated on domain experience Nicky lacks -- an AI- or enablement charter scoped to one business function (marketing, legal / legal-ops, finance) that names multi-year experience *in that function* as a requirement. Cross-functional product enablement is in scope; being the marketing or legal domain expert is not
-- Executive scope above a functional Head / VP -- enterprise-wide mandates requiring ~15+ years, setting board- or executive-level direction, reporting directly into the C-suite, or owning an org-wide (thousands-of-employees) L&D or CX strategy. Manager through VP / Head-of a *function* stays firmly in target; this is only about altitude beyond that
+- Executive scope above a functional Head / Director -- enterprise-wide mandates requiring ~15+ years, setting board- or executive-level direction, reporting directly into the C-suite, or owning an org-wide (thousands-of-employees) L&D or CX strategy. Manager through Director / Head-of a *function* stays firmly in target; this is only about altitude beyond that title band (VP/SVP titles themselves are excluded outright -- see the seniority-by-title filter above, not this signal)
 - Third-party-vendor certification / training -- programs built around teaching an external technology stack the employer resells or partners on (e.g. Microsoft, AWS, Salesforce-admin certification) rather than education about the employer's own product
 - AI framed as headcount efficiency: automation pitched as replacing people or "doing more with less" rather than making people more capable
 - Purely deterministic, back-office problem spaces with no human-behavior dimension: supply-chain optimization, data normalization, infrastructure tooling
@@ -138,12 +168,12 @@ Exclude a posting for its content only when the **title itself** is disqualifyin
 - Quota-carrying sales titles: SDR, BDR, AE / Account Executive, Account Manager, or any title where sales is the function
 - Junior titles: Associate, Coordinator, Assistant, Intern
 - Pure social-media titles: Social Media Manager / Coordinator
-- Pure community titles: Head / Manager / Director / VP of Community, Community Manager -- out of scope unless the title itself carries an education or enablement charter (e.g. "Education & Community")
+- Pure community titles: Head / Manager / Director of Community, Community Manager -- out of scope unless the title itself carries an education or enablement charter (e.g. "Education & Community")
 - Chief of Staff titles
 - Revenue Operations / RevOps titles
 - Developer-facing titles: Developer Relations / DevRel, Developer Advocate / Developer Advocacy, Developer Evangelist, and Developer Education -- or any title whose primary audience is developers / software engineers. Nicky is technical but has never been a SWE, so these skew too technical and center the wrong audience; they are excluded even when wrapped in education or enablement language.
 
-(The non-negotiable filters above -- location, industry, company type, salary, search window, "Lead" -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
+(The non-negotiable filters above -- location, industry, company type, salary, search window, seniority by title -- also exclude.) Anything else that looks wrong in the posting body is the downstream human review's call, not the search agent's -- include the posting.
 
 ## Liveness and verifiability (hard gates)
 
