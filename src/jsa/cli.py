@@ -10,7 +10,7 @@ agent.
 
 The cloud/local split shows up here as which commands the Fly image ever runs:
 only ``cron`` (and ``search``/``init-db`` by hand). Everything else is local —
-wanting a terminal, the local disk (``base_resume.docx``, the packet
+wanting a terminal, the local disk (``resume_templates/``, the packet
 directories), and, for the Sheet-touching commands, the local Google OAuth
 token held by the ``gws`` CLI.
 """

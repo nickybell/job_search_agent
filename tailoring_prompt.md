@@ -158,6 +158,13 @@ as internal enablement (or the reverse), or otherwise shifting a claim's
 fundamental character to fit the posting, is a distortion, not tailoring. Keep
 the original nature of the work intact.
 
+**Never escalate a claim's strength when rewording.** The verb carries the
+claim: work "used to pursue" renewals did not "drive" them; someone who
+"contributed to" a result did not "lead" it. When you reword a bullet, keep
+the causal strength of the original — you may sharpen the language, never
+promote the verb. The same applies to hedges: a qualifier in the source
+("helped," "supported," "part of") is part of the fact, not filler to cut.
+
 **Choose the framing, not just the fact.** For each piece of evidence, choose
 the framing that fits this role: lead with the metric when scale, impact,
 speed, or risk is the point; lead with the story when judgment, ownership, or a
@@ -212,7 +219,12 @@ who also clears the bar? WAR is **not** a list of the skills the posting asks
 for — every serious applicant will claim those. It is how the candidate
 *applies* that skillset to be better than the replacement at this specific
 position: the judgment, the track record, the distinctive angle that makes them
-uniquely interesting. Lead with that. Mirror the posting's *substance*, but do
+uniquely interesting. Lead with that. Make the argument as an **identity
+credential, not a tool list**: "Formerly a data scientist, I speak my
+customers' language" beats "I know SQL, Snowflake, Databricks, and BI
+dashboards" — the identity claim is credible and hard for the average
+applicant to copy, while the enumeration belongs in the Skills section, not
+here. Mirror the posting's *substance*, but do
 not dilute the summary into a paraphrase of the job description — a summary
 that could have been written by reading only the posting has thrown away the
 candidate's edge. Keep the candidate's own credible voice and the concrete
@@ -241,6 +253,15 @@ first.
 - Cut or fold bullets that aren't relevant to this specific role (`delete`, or
   fold the content into a stronger bullet) — but a fold may only carry a
   metric across if that metric unequivocally applies to the merged claim.
+- **Reframe scope-defining bullets instead of deleting them.** A bullet that
+  is the only evidence for part of a job title (e.g. the sole "Chief of
+  Staff" bullet under a "Customer Success Manager and Chief of Staff" title)
+  must survive in some form — rewrite it to foreground whatever facet serves
+  this posting, but do not cut it and leave the title unevidenced.
+- **One-line factual artifacts are cut last, if ever.** A line like
+  "Promoted from Associate Director in 2023" costs almost nothing against the
+  page budget and carries a trajectory signal no rewording substitutes for.
+  Never cut it just to tidy; it goes only if the whole role goes.
 - **Every role must keep at least two bullets.** If tailoring or page-budget
   cuts would leave a role with one, add a second relevant bullet or remove the
   role entirely (a last resort — see the page budget).
@@ -253,6 +274,18 @@ first.
 - Occasionally, a bullet may not follow these principles because it serves as a
   factual artifact rather than a narrative statement (e.g., "Promoted from
   Associate Director in 2023").
+
+**Secondary sections:**
+
+Some templates carry a compact named section (e.g. **Teaching**) between the
+main experience section and Education, holding roles that evidence a
+differentiator without disrupting the main section's narrative. Treat such a
+section as a trim-or-keep unit: tighten or drop individual bullets within it,
+or delete the whole section when its content genuinely does nothing for the
+posting — but never delete it while the summary still claims what it
+evidences. Do not try to *create* a new section heading with `insert_after`
+(an inserted paragraph inherits its anchor's formatting, so you cannot mint a
+heading from a bullet); sections exist in the template or not at all.
 
 **Skills section principles**:
 
@@ -300,6 +333,13 @@ exhaust each level before resorting to the next:
 3. **Remove a role.** Only as a last resort, drop the least-relevant role
    entirely. Role removals should be rare and are always the final option,
    never a first move.
+
+**After cutting, re-check the summary's evidence.** Every claim the summary
+makes must still be backed by at least one bullet in the body. If the
+page-budget pass cut the only evidence for a summary claim (e.g. the summary
+cites "teaching craft" but every teaching role was removed), either restore
+some evidence in tightened form or rewrite the summary to drop the claim —
+never ship a summary asserting what the body no longer shows.
 
 **A role header must never be orphaned from its bullets.** If a render shows a
 role header as the last line of page 1 with its first bullet at the top of page

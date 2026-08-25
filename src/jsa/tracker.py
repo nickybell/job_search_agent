@@ -66,7 +66,6 @@ log = logging.getLogger(__name__)
 
 # Fixed configuration per prd.md — the agent targets this Sheet, it does not
 # discover it at runtime. Overridable for a scratch copy while testing.
-DEFAULT_SPREADSHEET_ID = "<SPREADSHEET_ID>"
 # Eight columns, ID first (added 2026-08-16): the postings.id in column A is
 # the join key that lets refetch's scope lookup match Sheet rows back to DB
 # rows without comparing URLs.
@@ -150,8 +149,18 @@ def _gws_binary() -> str:
 
 
 def spreadsheet_id() -> str:
-    """The tracker Sheet id, overridable via ``JSA_TRACKER_SPREADSHEET_ID``."""
-    return os.environ.get("JSA_TRACKER_SPREADSHEET_ID") or DEFAULT_SPREADSHEET_ID
+    """The tracker Sheet id, from ``JSA_TRACKER_SPREADSHEET_ID``.
+
+    There is deliberately no default: the id names a personal spreadsheet, so
+    it lives in the gitignored ``.env``, never in code.
+    """
+    sheet_id = os.environ.get("JSA_TRACKER_SPREADSHEET_ID")
+    if not sheet_id:
+        raise TrackerError(
+            "JSA_TRACKER_SPREADSHEET_ID is not set. Create your tracker Sheet "
+            "(README, 'Using this for your own search') and put its id in .env."
+        )
+    return sheet_id
 
 
 def _run_gws(args: list[str], *, timeout: int = 60) -> dict:
