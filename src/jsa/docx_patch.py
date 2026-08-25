@@ -5,10 +5,14 @@ sees each template as numbered paragraphs and returns a JSON patch that names
 the template it targets (``base``) and lists per-paragraph operations —
 ``replace`` a paragraph's text, ``insert_after`` a new paragraph (which
 inherits the anchor paragraph's formatting, so a bullet inserted after a
-bullet is itself a bullet), or ``delete`` one. This module applies that patch
-to an in-memory copy of the chosen template with python-docx. Every id a
-change targets is resolved against the *original* numbering before anything
-moves, so inserts and deletes never shift the ids still to be applied, and bold
+bullet is itself a bullet), ``delete`` one, or ``move`` one to sit ``after`` or
+``before`` another paragraph (an explicit reorder op, so leading a role with
+its most relevant bullet is a mechanical relocation that preserves the run
+verbatim, not a delete-and-retype that risks dropping bold). This module
+applies that patch to an in-memory copy of the chosen template with
+python-docx. Every id a change targets is resolved against the *original*
+numbering before anything moves, so inserts, deletes, and moves never shift the
+ids still to be applied, and bold
 spans ride inline as ``**double asterisks**`` rendered into runs. The split is
 what buys a changelog rendered *from the applied patch* rather than a second
 model artifact that could drift, and formatting inherited from the template's
@@ -42,22 +46,42 @@ class PatchChange(BaseModel):
     """One paragraph operation, as the tailoring model returns it.
 
     ``op`` is ``replace`` (swap the paragraph's text), ``insert_after`` (add a
-    new paragraph after this one, inheriting its formatting), or ``delete``
-    (remove it). ``paragraph`` is always a ``[P<n>]`` id from the *original*
-    numbering; ``text`` is the full paragraph text (with ``**bold**`` spans)
-    for replace/insert and is unused for delete.
+    new paragraph after this one, inheriting its formatting), ``delete``
+    (remove it), or ``move`` (relocate it to sit immediately ``after`` or
+    ``before`` another paragraph). ``paragraph`` is always a ``[P<n>]`` id from
+    the *original* numbering; ``after``/``before`` (exactly one, on a move) are
+    likewise original ids naming the anchor to land next to; ``text`` is the
+    full paragraph text (with ``**bold**`` spans) for replace/insert and is
+    unused for delete/move.
     """
 
-    op: Literal["replace", "insert_after", "delete"] = "replace"
+    op: Literal["replace", "insert_after", "delete", "move"] = "replace"
     paragraph: int
+    after: int | None = None
+    before: int | None = None
     text: str = ""
     rationale: str
 
     @model_validator(mode="after")
-    def _text_required_for_writes(self) -> PatchChange:
+    def _validate_shape(self) -> PatchChange:
         if self.op in ("replace", "insert_after") and not self.text.strip():
             raise ValueError(
                 f"a {self.op} change on paragraph {self.paragraph} needs non-empty text"
+            )
+        if self.op == "move":
+            anchors = [a for a in (self.after, self.before) if a is not None]
+            if len(anchors) != 1:
+                raise ValueError(
+                    f"a move change on paragraph {self.paragraph} needs exactly one of "
+                    "'after' or 'before'"
+                )
+            if anchors[0] == self.paragraph:
+                raise ValueError(
+                    f"a move change cannot anchor paragraph {self.paragraph} on itself"
+                )
+        elif self.after is not None or self.before is not None:
+            raise ValueError(
+                f"'after'/'before' are only valid on a move change (paragraph {self.paragraph})"
             )
         return self
 
@@ -137,13 +161,21 @@ def render_numbered_text(document) -> str:
 
 @dataclass(frozen=True)
 class AppliedChange:
-    """One change as actually applied — the changelog's raw material."""
+    """One change as actually applied — the changelog's raw material.
+
+    For a ``move``, ``before`` carries the relocated paragraph's text and
+    ``anchor``/``relation`` name where it landed (``before``/``after`` which
+    id); ``after`` is unused. The two trailing fields default so the
+    replace/insert/delete constructions stay positional.
+    """
 
     op: str
     paragraph: int
     before: str
     after: str
     rationale: str
+    anchor: int | None = None
+    relation: str = ""
 
 
 _BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
@@ -204,7 +236,7 @@ def apply_patch(document, patch: TailoringPatch) -> list[AppliedChange]:
     """Apply ``patch`` to ``document`` in place; return what actually changed.
 
     Anchors are resolved against the original numbering, then applied in
-    phases (replace, insert, delete) so ids never shift mid-patch. A change
+    phases (replace, insert, move, delete) so ids never shift mid-patch. A change
     targeting an id that was never offered — out of range, or an empty spacer
     paragraph — raises ``PatchError`` rather than guessing. A ``replace`` whose
     text restates the paragraph unchanged is dropped silently (the contract
@@ -212,20 +244,26 @@ def apply_patch(document, patch: TailoringPatch) -> list[AppliedChange]:
     """
     originals = list(iter_paragraphs(document))
     count = len(originals)
+
     # Resolve and check every anchor against the ORIGINAL numbering first, so
     # the ids the model targeted stay valid no matter how many inserts and
     # deletes follow.
-    for change in patch.changes:
-        if not 0 <= change.paragraph < count:
+    def _require_offered(idx: int) -> None:
+        if not 0 <= idx < count:
             raise PatchError(
-                f"the patch targets paragraph {change.paragraph}, but the base resume "
+                f"the patch targets paragraph {idx}, but the base resume "
                 f"has paragraphs 0–{count - 1}"
             )
-        if not originals[change.paragraph].text.strip():
+        if not originals[idx].text.strip():
             raise PatchError(
-                f"the patch targets empty paragraph {change.paragraph}, which was never "
+                f"the patch targets empty paragraph {idx}, which was never "
                 "offered in the numbered base text"
             )
+
+    for change in patch.changes:
+        _require_offered(change.paragraph)
+        if change.op == "move":
+            _require_offered(change.after if change.after is not None else change.before)
 
     applied: list[AppliedChange] = []
     # Phase 1 — replaces, mutating the original paragraphs in place.
@@ -254,7 +292,26 @@ def apply_patch(document, patch: TailoringPatch) -> list[AppliedChange]:
         applied.append(
             AppliedChange("insert_after", change.paragraph, "", change.text, change.rationale)
         )
-    # Phase 3 — deletes last, so an insert_after a to-be-deleted anchor still
+    # Phase 3 — moves. Relocate an original paragraph to sit next to an anchor,
+    # both resolved from the original numbering. lxml's addnext/addprevious
+    # re-parents the element in place, so there is no clone and no renumber, and
+    # a replace already applied to it in phase 1 rides along.
+    for change in patch.changes:
+        if change.op != "move":
+            continue
+        moved = originals[change.paragraph]
+        if change.after is not None:
+            originals[change.after]._p.addnext(moved._p)
+            anchor, relation = change.after, "after"
+        else:
+            originals[change.before]._p.addprevious(moved._p)
+            anchor, relation = change.before, "before"
+        applied.append(
+            AppliedChange(
+                "move", change.paragraph, moved.text, "", change.rationale, anchor, relation
+            )
+        )
+    # Phase 4 — deletes last, so an insert_after a to-be-deleted anchor still
     # lands (as a following sibling) before the anchor element is removed.
     for change in patch.changes:
         if change.op != "delete":
@@ -316,13 +373,18 @@ def render_changelog(
         "replace": "Replaced paragraph",
         "insert_after": "Inserted after paragraph",
         "delete": "Deleted paragraph",
+        "move": "Moved paragraph",
     }
     for n, change in enumerate(applied, start=1):
         heading = headings.get(change.op, "Paragraph")
         lines += [f"### {n}. {heading} {change.paragraph}", ""]
-        if change.before:
-            lines.append(f"- **Before:** {change.before}")
-        if change.after:
-            lines.append(f"- **After:** {change.after}")
+        if change.op == "move":
+            lines.append(f"- **Moved:** {change.before}")
+            lines.append(f"- **To:** {change.relation} paragraph {change.anchor}")
+        else:
+            if change.before:
+                lines.append(f"- **Before:** {change.before}")
+            if change.after:
+                lines.append(f"- **After:** {change.after}")
         lines += [f"- **Why:** {change.rationale}", ""]
     return "\n".join(lines)
