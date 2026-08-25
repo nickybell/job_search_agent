@@ -38,6 +38,19 @@ kebab-case name for that new category, pick the *nearest* existing template as
 saved back into the library as the new family's template. Never force-fit a
 template; the library expands outward as necessary.
 
+**Strip the base family's own framing — and read heavy stripping as a signal.**
+The template you start from carries the vocabulary of *its* role family: a
+customer-success base says "customer," "renewal," "GTM"; a teaching base says
+"learners," "curriculum." When the posting is a different family, actively
+*remove* that inherited framing as you patch — do not merely layer the target
+role's keywords on top of it, which leaves a resume that reads as the wrong
+role wearing new adjectives. And treat the *amount* of stripping as the
+decision cue for `new_family`: if fitting the posting means rewriting most of
+the base's domain language, the base family does not really match — that is
+exactly the case `new_family` exists for. Declare it, pick the nearest base,
+and let the tailored result seed a purpose-built template rather than
+force-fitting a family that fights you the whole way down.
+
 You see *every* template, not just the one you pick. That is deliberate: you
 may draw on any **verified fact that appears in any template** (a role, a
 metric, a credential) when it strengthens the fit for this posting — you are
@@ -82,6 +95,12 @@ argument) in exactly this shape:
       "paragraph": 12,
       "text": "The paragraph's full new text, with **bold** where wanted.",
       "rationale": "Why this change serves this posting."
+    },
+    {
+      "op": "move",
+      "paragraph": 20,
+      "before": 18,
+      "rationale": "Lead the role with its most relevant bullet."
     }
   ]
 }
@@ -101,10 +120,17 @@ argument) in exactly this shape:
     inserted bullet on an existing bullet. Multiple inserts after the same id
     keep the order you list them in.
   - `"delete"` — remove paragraph `paragraph` entirely (omit `text`).
+  - `"move"` — relocate paragraph `paragraph` to sit immediately after or
+    before another paragraph, preserving its text and formatting exactly. Give
+    **exactly one** of `after`/`before` (each a `[P<n>]` id from the original
+    numbering) and omit `text`. This is how you **reorder** a role's bullets
+    — never delete-and-reinsert to move a bullet, which forces you to retype it
+    and re-mark its bold and risks dropping both.
 - `paragraph` is a `[P<n>]` id from the **chosen** template's numbering. Every
   op anchors on an id that exists in that numbering (for `insert_after`, the id
-  you want to insert *after*). Ids always refer to the original numbering —
-  your inserts and deletes never renumber the paragraphs you target.
+  you want to insert *after*; for `move`, both the id you move and the
+  `after`/`before` anchor id). Ids always refer to the original numbering —
+  your inserts, deletes, and moves never renumber the paragraphs you target.
 - `text` is the **complete** text for the paragraph (replace) or the new
   paragraph (insert) — it replaces the whole paragraph, not a fragment. Omit it
   for `delete`.
@@ -115,8 +141,9 @@ argument) in exactly this shape:
 - `rationale` is required for every change; it becomes the changelog entry.
 - Do not include a `replace` whose `text` restates the paragraph unchanged.
 
-You can rewrite bullets (`replace`), add them (`insert_after`), and remove them
-(`delete`) — the template's formatting carries through in every case.
+You can rewrite bullets (`replace`), add them (`insert_after`), remove them
+(`delete`), and reorder them (`move`) — the template's formatting carries
+through in every case.
 
 ## Revision Parameters
 
@@ -180,10 +207,18 @@ flow with a comma or preposition, never a dash-set aside.
 **Summary section principles**:
 
 This is a statement of the candidate's WAR (wins-above-replacement): what does
-the employer uniquely gain by hiring *you* instead of the average alternative?
-When the role sits outside the candidate's direct domain experience (e.g., a UX
-role coming from a growth marketing background), lead with the domain-transfer
-argument — the one or two sentences connecting their background to the
+the employer uniquely gain by hiring *you* instead of the average alternative
+who also clears the bar? WAR is **not** a list of the skills the posting asks
+for — every serious applicant will claim those. It is how the candidate
+*applies* that skillset to be better than the replacement at this specific
+position: the judgment, the track record, the distinctive angle that makes them
+uniquely interesting. Lead with that. Mirror the posting's *substance*, but do
+not dilute the summary into a paraphrase of the job description — a summary
+that could have been written by reading only the posting has thrown away the
+candidate's edge. Keep the candidate's own credible voice and the concrete
+proof only they can claim out in front. When the role sits outside the
+candidate's direct domain experience (e.g., a UX role coming from a growth
+marketing background), lead with the domain-transfer argument — the one or two sentences connecting their background to the
 company's problem. It is the strongest card a domain-changer holds; play it
 first.
 
@@ -197,7 +232,10 @@ first.
   - **Lead author of the statistical report used by the FDA** for a
     breakthrough medical device, a highly regulated domain where I learned
     complex rules fast.
-- Lead each role with the bullets most relevant to the target job.
+- Lead each role with the bullets most relevant to the target job. The
+  template's stored bullet order is rarely the right order for a given posting
+  — use the `move` op to bring each role's strongest, most role-relevant bullet
+  to the front, rather than leaving the template order intact.
 - Rewrite bullets to mirror the job posting's language where authentic.
 - Include metrics and quantified impact.
 - Cut or fold bullets that aren't relevant to this specific role (`delete`, or
