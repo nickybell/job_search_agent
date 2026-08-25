@@ -4,9 +4,11 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 
 > This repository doubles as a portfolio example of building a real system with AI coding tools. The design was worked out as a written spec **before** any code: [`prd.md`](./prd.md) is the source of truth, [`TODO.md`](./TODO.md) tracks open decisions, and [`deep_research_prompt.md`](./deep_research_prompt.md) is the search prompt itself. See [How this was built](#how-this-was-built).
 
+**Running it for your own job search is the intended use** — everything personal to my search is gitignored or parameterized. [Using this for your own search](#using-this-for-your-own-search) is the four-item checklist.
+
 ## Status
 
-**In development.** This repo implements **all five steps** of the PRD:
+**Working end-to-end.** This repo implements **all five steps** of the PRD:
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
@@ -14,11 +16,11 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
-| 4 | Tailor a per-job resume from `base_resume.docx` (structured patch → `.docx`/`.pdf` + changelog) | Local terminal |
+| 4 | Tailor a per-job resume from the `resume_templates/` library (a render-loop agent patches a template and verifies a two-page PDF budget) | Local terminal |
 | 5 | Append `Apply` postings to the Google Sheet application tracker (Step 4's final action) | Local terminal |
 | — | Ground-truth loop: a weekly PR proposing search-prompt refinements from fit feedback | GitHub Actions |
 
-The tailoring instructions (`tailoring_prompt.md`) are a committed placeholder with deliberately conservative guidance, and the refinement instructions (`refine_search_prompt.md`) are a first version — both are meant to be revised in place; see `TODO.md`.
+The refinement instructions (`refine_search_prompt.md`) are a first version, revised in place as the ground-truth loop accumulates evidence; remaining setup items live in `TODO.md`.
 
 ## Architecture
 
@@ -47,7 +49,41 @@ uv sync                     # create the venv and install dependencies
 cp .env.example .env        # then fill in credentials (see below)
 ```
 
-Credentials (see `.env.example` for details): a Turso database URL + token, an Anthropic API key (the weekly Claude sweep), and a Perplexity API key (the recurring Mon/Wed/Fri search).
+Credentials (see `.env.example` for details): a Turso database URL + token, Claude auth for every Claude-driven step (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` on a subscription, or a pay-as-you-go `ANTHROPIC_API_KEY` — never both), a Perplexity API key (the recurring Mon/Wed/Fri search), and — for the Step 5 tracker write — your own Google Sheet's id in `JSA_TRACKER_SPREADSHEET_ID`.
+
+## Using this for your own search
+
+I built this for my search, but everything personal is gitignored or
+parameterized, so a clone is a working skeleton. Four things make it yours:
+
+1. **Rewrite the search prompt for you.** `deep_research_prompt.md` opens with
+   a Candidate section, target titles, and non-negotiable filters (location,
+   salary, industry) that describe *my* search — replace those with yours and
+   keep the rest: the Sources, Output, and Liveness sections are the
+   load-bearing search machinery and are candidate-agnostic. Once you start
+   reviewing postings, the weekly [`jsa refine` loop](#refining-the-search-prompt-from-ground-truth)
+   keeps tuning the criteria from your own feedback.
+2. **Seed a resume template library.** `resume_templates/` (gitignored, so you
+   start empty) holds one polished `.docx` resume per role family you apply
+   to — e.g. `customer-education.docx`. `jsa generate` picks one per job and
+   patches it. Also rewrite the persona and role families at the top of
+   `tailoring_prompt.md`, which currently name mine.
+3. **Create your own tracker Sheet.** Make a Google Sheet with an
+   `Applications` tab whose header row is the eight columns described in
+   `prd.md` (Application Tracker), put its id in `JSA_TRACKER_SPREADSHEET_ID`
+   in `.env`, and install the [`gws`](https://github.com/googleworkspace/cli)
+   CLI (`gws auth login`). There is deliberately no default Sheet id in the
+   code — the Sheet-touching commands fail with a pointer here until you set it.
+4. **Provision your own cloud pieces.** `turso db create` for the database and
+   `fly launch` for the search cron — Fly will prompt you for your own app name
+   (the committed `fly.toml` carries mine, which is already taken). Both are
+   step-by-step in [Deployment](#deployment-flyio--turso); the search runs fine
+   locally via `uv run jsa search` before you ever deploy.
+
+Two local assumptions worth knowing: `jsa review` opens each posting with
+macOS's `open -a "Google Chrome"` (one line to change for another OS or
+browser), and `jsa generate` renders PDFs with LibreOffice, so it needs
+`soffice` on PATH.
 
 ## Usage
 
@@ -171,8 +207,8 @@ uv run jsa packet --id 42      # one packet, even if the row is already tracked
 ensures the packet directory and `job_posting.md` (re-entering a bare
 directory left by an interrupted run or a refetch rebuild — the completion
 guard is `added_to_tracker`, not directory-exists), tailors the best-fit
-template from the `resume_templates/` library in one headless model call,
-and writes into the packet:
+template from the `resume_templates/` library with a headless render-loop
+agent, and writes into the packet:
 
 - the tailored resume as `.docx` **and** `.pdf` (LibreOffice headless renders
   the PDF); file names carry no spaces, the directory name does;
@@ -182,14 +218,20 @@ and writes into the packet:
 The model (pinned `claude-opus-4-8`) never edits a file: it sees every
 template in the library (one maintained resume per role family) as numbered
 paragraphs, picks the one whose family fits the posting — the pick and its
-rationale land in the changelog — and returns a **structured JSON patch**
-that `python-docx` applies deterministically to a fresh copy of that
-template: reproducible reruns, formatting that can't break. The library
+rationale land in the changelog — and submits **structured JSON patches**
+(replace / insert / delete / move per paragraph, `**bold**` inline) to an
+in-process `render_resume` tool. The tool applies each patch
+deterministically to a fresh copy of the template via `python-docx`, renders
+the PDF (LibreOffice headless), and reports the page count back; the model
+iterates until the resume fits a hard **two-page budget** with no orphaned
+role headers. Verifying the budget against a real render is the point of the
+loop — reruns aren't bit-identical, but the formatting can't break and every
+change is a named, addressable op. The library
 expands outward rather than force-fitting: when no family matches, the model
 declares a new one, starts from the nearest template, and the tailored
 result is saved back as the new family's template (flagged for review). The
-tailoring instructions live in `tailoring_prompt.md` (currently a
-conservative placeholder; its output contract is load-bearing).
+tailoring instructions live in `tailoring_prompt.md`; the op-based patch
+contract inline there is load-bearing.
 
 A row with no captured JD is skipped, never tailored blind — run
 `jsa refetch --id 42`, or paste the JD into the packet's `job_posting.md` by
@@ -231,7 +273,9 @@ after the Sheets API confirms the append, so a failure leaves the posting in the
 backlog rather than silently dropping it; re-running never double-appends.
 The write shells out to the local [`gws`](https://github.com/googleworkspace/cli)
 CLI, which holds the Google OAuth token — that credential stays off the Fly.io
-server by design. If `gws` reports an expired grant, re-run `gws auth login`.
+server by design. The target Sheet is your own, via `JSA_TRACKER_SPREADSHEET_ID`
+(see [Using this for your own search](#using-this-for-your-own-search)). If
+`gws` reports an expired grant, re-run `gws auth login`.
 
 ```bash
 uv run jsa track --dry-run     # print the exact rows without writing
@@ -241,7 +285,7 @@ uv run jsa track --id 42       # elevate one posting
 ## Deployment (Fly.io + Turso)
 
 Steps 1–2 run headless on a Fly.io Machine that wakes daily, runs one search, and
-stops. Steps 3 (and later 4–5) run locally against the same Turso database.
+stops. Steps 3–5 run locally against the same Turso database.
 
 > The commands below are run **by you** — they create billed accounts and set
 > secrets that must never pass through an agent transcript.
@@ -407,7 +451,7 @@ src/jsa/
   review.py          Step 3 deterministic review loop
   refetch.py         reconcile stored postings against their (mutable) ATS record
   packet.py          Step 4's deterministic head: create + seed the packet directory
-  generate.py        Step 4: one-shot resume tailoring (structured patch) + track
+  generate.py        Step 4: render-loop resume tailoring (structured patch) + track
   docx_patch.py      applies the tailoring patch to the .docx (pure)
   refine.py          the ground-truth prompt-refinement loop (weekly PR via CI)
   prompting.py       line-edited terminal input shared by the local commands

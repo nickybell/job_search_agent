@@ -1,7 +1,7 @@
 [project]
 name = "job-search-agent"
 version = "0.1.0"
-description = "A personal job-search agent (Claude Agent SDK) that runs a daily search for Customer Education / Enablement / Community roles, stores them idempotently, and collects fit feedback."
+description = "A personal job-search agent (Claude Agent SDK) that runs a recurring search for Customer Enablement / Education / AI Enablement roles, stores postings idempotently with their full job descriptions, and collects fit feedback for a learning loop."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

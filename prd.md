@@ -227,7 +227,7 @@ Step 5 appends one row to a Google Sheet for each job that reaches the applicati
 **The tracker Sheet.**
 
 - **Title:** `Job Search Application Tracker` (tab: `Applications`).
-- **Spreadsheet ID (config):** `1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4` — the agent needs this ID to target the append; it is fixed configuration, not something the agent discovers at runtime.
+- **Spreadsheet ID (config):** read from the `JSA_TRACKER_SPREADSHEET_ID` environment variable — the agent needs this ID to target the append; it is fixed configuration, not something the agent discovers at runtime. It names a personal spreadsheet, so it lives in the gitignored `.env` with no in-code default, never in the repo.
 - **Header row** is bolded and frozen (`frozenRowCount = 1`).
 
 **Columns (in order).** `ID` and the next four are written verbatim from the `postings` row; the last three are set/filled as noted:
@@ -249,7 +249,7 @@ Step 5 appends one row to a Google Sheet for each job that reaches the applicati
 
 ```
 gws sheets spreadsheets values append \
-  --params '{"spreadsheetId":"1DQNix3tZ9oFqfA9R2r0Npj1UWvAu2cEg_RJVf6SGki4","range":"Applications!A:H","valueInputOption":"USER_ENTERED","insertDataOption":"OVERWRITE"}' \
+  --params '{"spreadsheetId":"<JSA_TRACKER_SPREADSHEET_ID>","range":"Applications!A:H","valueInputOption":"USER_ENTERED","insertDataOption":"OVERWRITE"}' \
   --json   '{"values":[["<id>","<normalized_company>","<title>","<url>","<date_posted>","<date_added>","",""]]}'
 ```
 
