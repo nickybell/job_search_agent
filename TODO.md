@@ -69,6 +69,24 @@ defect, so never encoded as a prompt edit.
   technical solutions/field-engineer roles the user consistently skips, e.g.
   MinIO id 32.)
 
+- [ ] **Unburdn AI — AI Partner Catalyst** (id 67, manual add, decided
+  Apply). Supplied URL is a custom careers page
+  (`unburdn.ai/careers/ai-partner-catalyst`), not one of the four supported
+  ATS platforms, so the search could never have emitted it — out of scope by
+  construction, not a prompt defect. (Secondary, unencoded: "AI Partner
+  Catalyst" is a coined title with no seeded variant, and its "Partner"
+  framing overlaps the partnerships/channel negative signal; left unencoded
+  because a bespoke early-stage title is not a generalizable vocabulary gap.)
+
+- [ ] **GovAI (Centre for the Governance of AI) — Research Manager** (id 73,
+  manual add, decided Apply). Supplied URL is a custom site post
+  (`governance.ai/post/dc-research-manager-talent-development-team`), not a
+  supported ATS, so it is out of scope for the search by construction.
+  (Secondary, unencoded: "Research Manager" is neither a seeded target title
+  nor an obvious variant of one — the URL slug's "talent-development-team"
+  hints at an internal L&D/enablement flavor, but seeding a title this generic
+  would flood the result set with off-target research roles. Left unencoded.)
+
 ## Later / optional
 
 - [ ] **Give the refiner the data its adherence audit's version caveat
