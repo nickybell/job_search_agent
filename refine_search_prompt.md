@@ -12,8 +12,10 @@ deliverable described at the bottom, and nothing else.
 
 These are the postings decided since the last refinement run. `decision` and
 the free-text feedback are the user's own words — first-class data. Postings
-marked `search_agent: manual` were added by the user by hand: the search
-never surfaced them, which makes them the recall signal analyzed below.
+marked `search_agent: manual` were added by the user by hand — an ordinary
+part of the workflow — so the search never surfaced them; the ones that carry
+a job description are the recall signal analyzed below (those with none are
+ignored, see below).
 
 {{GROUND_TRUTH}}
 
@@ -64,15 +66,22 @@ why the posting was surfaced anyway (see the adherence audit below).
 
 ## Three analyses beyond the explicit feedback
 
-1. **Manual adds are recall failures — analyze each one.** For every
-   `search_agent: manual` posting above, judge whether the prompt as written
-   would have surfaced it. If not, classify the miss: a title-vocabulary
-   gap, a source gap, or an over-tight negative signal — each fixable with a
-   prompt edit under the rules above — or an **unsupported ATS platform**,
-   which is *not* a prompt defect (out of scope by construction) but is
-   evidence for expanding the supported-ATS table: record it in `TODO.md`,
-   never as a prompt edit. A manual add may also simply predate any search
-   window — judge, don't assume.
+1. **Manual adds are a recall signal — analyze the ones you can.** A
+   `search_agent: manual` posting is a role the user found and wanted that
+   the search did not surface. For each one **that carries a job
+   description**, judge whether the prompt as written would have surfaced it;
+   if not, classify the miss as a title-vocabulary gap, a source gap, or an
+   over-tight negative signal — each fixable with a prompt edit under the
+   rules above. A manual add may also simply predate any search window —
+   judge, don't assume.
+
+   **A manual add with no job description (rendered `(no JD captured)`) is
+   ignored — do not analyze it, and do not record it anywhere.** These are
+   postings on an ATS platform outside the supported four, which the search
+   cannot emit by construction; hand-adding them is an ordinary part of the
+   user's workflow, not a search defect, and with no JD there is nothing to
+   mine and nothing to encode. Skip the row silently — never open a `TODO.md`
+   item, and never flag it for follow-up.
 2. **Mine the JDs for implicit patterns.** The ground truth includes each
    posting's full job description, so the decisions are labeled documents.
    Pattern-match across the Apply and Skip JDs for regularities the feedback
@@ -119,7 +128,7 @@ why the posting was surfaced anyway (see the adherence audit below).
 2. A matching update to `prd.md` wherever it describes the search criteria —
    it is the source of truth and must not drift from the prompt.
 3. Anything too ambiguous to encode: a checkbox in `TODO.md` with your
-   reasoning. (Also where unsupported-ATS recall evidence accumulates.)
+   reasoning.
 4. **Your final message = the PR body.** In it: a changelog of every edit
    with the ground truth that motivated it; the manual-adds recall analysis;
    the adherence audit and its tallies; any implicit patterns you found,
