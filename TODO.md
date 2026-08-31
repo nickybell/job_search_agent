@@ -75,6 +75,19 @@ reasoning live in `prd.md`; what happened lives in the git log.
   rule. Let `jsa refine` accumulate the signal first; this is the lever if it
   keeps happening.
 
+- [ ] **Decide whether cybersecurity is a vertical Nicky wants down-weighted.**
+  Ground truth is contradictory, so nothing was encoded. Two skips lean on it
+  (RegScale id 65, "didn't understand the lingo" of a GRC/CCM product;
+  Corelight id 78, "I really don't find cybersecurity interesting... I've
+  rejected a number of cybersecurity jobs to date") — but RSA Security id 41
+  was an **Apply** ("I find the vertical (security) pretty uninteresting, but
+  this is such a close fit... worth getting the reps in"). A hard exclusion
+  would false-negative the RSA case; even a negative signal is questionable
+  since role fit clearly overrode the vertical there. Left for the user: is
+  cybersecurity a soft deprioritize (encode as a negative signal), or is it
+  pure review-time judgment that should stay out of the prompt? Needs an
+  explicit call, not a mined guess.
+
 - [ ] **Publish the repo** as a public portfolio piece on your personal
   GitHub account — after the credential rotation above. `base_resume.docx`,
   `resume_templates/`, and `IDEAS.md` stay untracked.
