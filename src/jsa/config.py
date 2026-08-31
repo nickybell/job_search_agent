@@ -3,6 +3,12 @@
 Locally these come from a gitignored ``.env`` (loaded here via python-dotenv);
 in the Fly.io deployment the same names are injected as ``fly secrets``. Either
 way the code just reads ``os.environ``.
+
+Note what is *not* here: Claude auth. Every Claude-driven step drives the Claude
+Agent SDK, which spawns the Claude Code CLI subprocess, and that CLI reads its
+credential (``CLAUDE_CODE_OAUTH_TOKEN`` from ``claude setup-token``, or a
+pay-as-you-go ``ANTHROPIC_API_KEY``) straight from the inherited environment. No
+code passes it, so it does not belong on ``Config``.
 """
 
 from __future__ import annotations
@@ -21,15 +27,14 @@ class Config:
 
     turso_database_url: str
     turso_auth_token: str | None
-    anthropic_api_key: str | None
     perplexity_api_key: str | None
 
 
 def load_config() -> Config:
     """Read configuration from the environment.
 
-    Only ``TURSO_DATABASE_URL`` is required for every command; the per-agent API
-    keys are validated lazily by whichever search runner needs them, so that
+    Only ``TURSO_DATABASE_URL`` is required for every command; the Perplexity
+    API key is validated lazily by the search runner that needs it, so that
     e.g. ``jsa review`` works with only the database configured.
     """
     url = os.environ.get("TURSO_DATABASE_URL")
@@ -41,6 +46,5 @@ def load_config() -> Config:
     return Config(
         turso_database_url=url,
         turso_auth_token=os.environ.get("TURSO_AUTH_TOKEN") or None,
-        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
         perplexity_api_key=os.environ.get("PERPLEXITY_API_KEY") or None,
     )
