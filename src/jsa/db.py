@@ -86,13 +86,23 @@ CREATE TABLE IF NOT EXISTS search_findings (
 # Recording at run time (never PR-merge time) is deliberate: a rejected
 # translation still *considered* its rows, and re-deciding a posting is how it
 # re-enters scope.
-_REFINEMENT_RUNS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS prompt_refinement_runs (
+#
+# ``id`` is a surjective primary key: libSQL over the Hrana/HTTP transport
+# refuses a DELETE against a table with no stable row identity, so an id is what
+# lets a row be removed by hand (e.g. rolling back a run to widen the ground
+# truth radius before the next pass). Held as a bare column list — like
+# ``_POSTINGS_COLUMNS`` — so the migration below can rebuild the table from the
+# same text.
+_REFINEMENT_RUNS_COLUMNS = """
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     considered INTEGER NOT NULL,
     changed    INTEGER NOT NULL DEFAULT 0
-)
 """
+
+_REFINEMENT_RUNS_SCHEMA = (
+    f"CREATE TABLE IF NOT EXISTS prompt_refinement_runs ({_REFINEMENT_RUNS_COLUMNS})"
+)
 
 
 @dataclass
@@ -153,6 +163,7 @@ def init_db(client: Connection) -> None:
     # would fill that window with a shiny empty `postings`, orphaning the real
     # rows. Migrating first means the create only ever fires on a truly new DB.
     migrate_postings_schema(client)
+    migrate_refinement_runs_schema(client)
     client.execute(_SCHEMA)
     client.execute(_FINDINGS_SCHEMA)
     client.execute(_REFINEMENT_RUNS_SCHEMA)
@@ -208,6 +219,63 @@ def migrate_postings_schema(client: Connection) -> bool:
         client.execute("DROP TABLE postings_pre_manual")
         migrated = True
     return migrated
+
+
+def migrate_refinement_runs_schema(client: Connection) -> bool:
+    """Add the ``id`` primary key to a pre-existing ``prompt_refinement_runs``.
+
+    The table shipped without a primary key, and libSQL over Hrana/HTTP refuses
+    a DELETE against a table with no stable row identity. SQLite cannot add a
+    PRIMARY KEY with ``ALTER TABLE``, so this does the standard rebuild: create
+    the new table, copy rows oldest-first (so the fresh AUTOINCREMENT ids run in
+    chronological order), swap names, drop the old one. ``run_at`` is copied
+    verbatim, so the ``MAX(run_at)`` cutoff is unaffected.
+
+    Like ``migrate_postings_schema`` this is not atomic on hosted Turso (each
+    statement is its own round-trip), so the sequence is ordered to never lose
+    data and ``_recover_interrupted_refinement_migration`` finishes a half-done
+    swap on the next run. Returns True if the rebuild ran, False if the table is
+    already current or does not exist yet.
+    """
+    _recover_interrupted_refinement_migration(client)
+    row = client.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prompt_refinement_runs'"
+    ).fetchone()
+    if row is None:
+        return False
+    sql = row[0] or ""
+    # The only pre-id schema had no PRIMARY KEY, so no AUTOINCREMENT keyword;
+    # its presence is an unambiguous "already migrated" marker (unlike "id",
+    # which is a substring of "considered").
+    if "AUTOINCREMENT" in sql:
+        return False
+    client.execute("DROP TABLE IF EXISTS prompt_refinement_runs_migrated")
+    client.execute(f"CREATE TABLE prompt_refinement_runs_migrated ({_REFINEMENT_RUNS_COLUMNS})")
+    client.execute(
+        "INSERT INTO prompt_refinement_runs_migrated (run_at, considered, changed) "
+        "SELECT run_at, considered, changed FROM prompt_refinement_runs ORDER BY run_at ASC"
+    )
+    client.execute("ALTER TABLE prompt_refinement_runs RENAME TO prompt_refinement_runs_pre_id")
+    client.execute("ALTER TABLE prompt_refinement_runs_migrated RENAME TO prompt_refinement_runs")
+    client.execute("DROP TABLE prompt_refinement_runs_pre_id")
+    return True
+
+
+def _recover_interrupted_refinement_migration(client: Connection) -> None:
+    """Finish a ``prompt_refinement_runs`` rebuild that died between statements.
+
+    Mirrors ``_recover_interrupted_migration``: the replacement renamed-away but
+    not yet renamed-in (the only window the table is missing entirely), and the
+    superseded copy left undropped. Idempotent and cheap.
+    """
+    names = _table_names(client)
+    if "prompt_refinement_runs" not in names and "prompt_refinement_runs_migrated" in names:
+        client.execute(
+            "ALTER TABLE prompt_refinement_runs_migrated RENAME TO prompt_refinement_runs"
+        )
+        names = _table_names(client)
+    if "prompt_refinement_runs" in names and "prompt_refinement_runs_pre_id" in names:
+        client.execute("DROP TABLE prompt_refinement_runs_pre_id")
 
 
 def _table_names(client: Connection) -> set[str]:
@@ -552,7 +620,12 @@ def decided_history(client: Connection) -> list[tuple]:
 
 
 def record_refinement_run(client: Connection, *, considered: int, changed: bool) -> None:
-    """Log one refinement run; its ``run_at`` becomes the next run's cutoff."""
+    """Log one refinement run; its ``run_at`` becomes the next run's cutoff.
+
+    ``id`` is left to AUTOINCREMENT so every recorded run carries a stable,
+    deletable primary key (needed to roll a run back over the Hrana/HTTP
+    transport); ``run_at`` still defaults to ``datetime('now')``.
+    """
     client.execute(
         "INSERT INTO prompt_refinement_runs (considered, changed) VALUES (?, ?)",
         (considered, 1 if changed else 0),
