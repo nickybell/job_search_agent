@@ -15,14 +15,21 @@ between Steps 4 and 5.
 The tailoring mechanism (decided 2026-08-21) is a **structured patch** over a
 **curated template library** (decided 2026-08-22): ``resume_templates/`` holds
 one maintained ``.docx`` per role family, and the model call — the Claude
-Agent SDK, headless, pinned to ``claude-opus-4-8``, no inherited session state
-— sees *every* template as numbered paragraphs, names the one its patch
+Agent SDK, headless, pinned to ``claude-fable-5`` at ``medium`` effort, no
+inherited session state — sees *every* template as numbered paragraphs, names
+the one its patch
 targets (``base``, with the rationale recorded in the changelog), and returns
 a JSON patch that ``docx_patch`` applies deterministically with python-docx.
 The library expands outward rather than force-fitting: a ``new_family``
 declaration saves the tailored result back into the library as the new role
 family's template, flagged in the changelog for a curation scrub. The PDF is
 rendered with LibreOffice headless (``soffice``).
+
+The tailoring prompt also interpolates the bullet ground-truth library —
+``resume_bullets.csv`` in the packets directory (``JSA_BULLETS_DOC`` to
+override), maintained by ``jsa bullets`` (see ``bullets.py``) — so revisions
+reuse the canonical, vetted wording of every claim already sent. A missing
+library degrades to a logged warning, never a failed run.
 
 A row with no captured JD is never tailored blind: its directory is ensured,
 but the tailoring and the tracker call are skipped and the row stays in the
@@ -65,6 +72,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from . import db
+from .bullets import bullet_library_path
 from .config import Config
 from .docx_patch import (
     PatchError,
@@ -80,7 +88,8 @@ from .tracker import TrackerError, run_tracker
 
 log = logging.getLogger(__name__)
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-fable-5"
+EFFORT = "medium"
 _PROMPT_FILENAME = "tailoring_prompt.md"
 _DEFAULT_WORKERS = 3
 _SOFFICE_TIMEOUT = 180
@@ -189,12 +198,22 @@ def resume_file_stem(normalized_company: str, title_slug: str) -> str:
     return f"NicholasBell_Resume_{title_part}_{company_part}"
 
 
+def load_bullet_library() -> str | None:
+    """The bullet ground-truth CSV's raw text, or None when it does not exist yet."""
+    path = bullet_library_path()
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    return text or None
+
+
 def load_tailoring_prompt(
     *,
     title: str,
     company: str,
     jd_markdown: str,
     templates_text: str,
+    bullet_library: str | None = None,
     path: Path | None = None,
 ) -> str:
     """Read the tailoring prompt template and fill its per-job slots."""
@@ -205,6 +224,7 @@ def load_tailoring_prompt(
         .replace("{{COMPANY}}", company)
         .replace("{{JOB_DESCRIPTION}}", jd_markdown)
         .replace("{{RESUME_TEMPLATES}}", templates_text)
+        .replace("{{BULLET_LIBRARY}}", bullet_library or "(no bullet library available)")
     )
 
 
@@ -272,6 +292,7 @@ async def _run_tailoring_agent(prompt: str, apply_render: ApplyRenderFn) -> str:
     server = create_sdk_mcp_server("resume", tools=[render_resume])
     options = ClaudeAgentOptions(
         model=MODEL,
+        effort=EFFORT,
         mcp_servers={"resume": server},
         allowed_tools=["mcp__resume__render_resume"],
         permission_mode="bypassPermissions",
@@ -456,6 +477,13 @@ def run_generate(
         # template fresh, since apply_patch mutates the Document.
         templates = load_template_paths()
         templates_text = render_templates_text(templates)
+        bullet_library = load_bullet_library()
+        if bullet_library is None:
+            log.warning(
+                "no bullet library at %s — tailoring without the cross-application "
+                "ground truth (build it, then seed with `jsa bullets --baseline`)",
+                bullet_library_path(),
+            )
         prompt_path = _default_prompt_path()
         if not prompt_path.is_file():
             raise GenerateError(f"tailoring prompt not found at {prompt_path}.")
@@ -470,7 +498,14 @@ def run_generate(
 
         def worker(row: tuple) -> GenerateResult:
             return _generate_one(
-                row, config, templates, templates_text, prompt_path, tailor, track_lock
+                row,
+                config,
+                templates,
+                templates_text,
+                bullet_library,
+                prompt_path,
+                tailor,
+                track_lock,
             )
 
         max_workers = min(_worker_count(), len(rows))
@@ -514,6 +549,7 @@ def _generate_one(
     config: Config,
     templates: dict[str, Path],
     templates_text: str,
+    bullet_library: str | None,
     prompt_path: Path,
     tailor: TailorFn,
     track_lock: threading.Lock,
@@ -551,6 +587,7 @@ def _generate_one(
             company=company,
             jd_markdown=jd,
             templates_text=templates_text,
+            bullet_library=bullet_library,
             path=prompt_path,
         )
         stem = resume_file_stem(normalized_company, title_slug)

@@ -97,6 +97,8 @@ uv run jsa refetch --dry-run                   # report drift on Apply postings 
 uv run jsa packet --dry-run                    # preview the application-packet directories
 uv run jsa generate --dry-run                  # preview the resume-generation queue
 uv run jsa generate                            # tailor resumes + append to the tracker
+uv run jsa bullets --dry-run                   # list resumes newer than the last bullet-library sync
+uv run jsa bullets                             # fold new resumes' bullets into the ground-truth library
 uv run jsa refine --dry-run                    # preview the prompt-refinement scope
 uv run jsa track --dry-run                     # preview the tracker rows
 uv run jsa track                               # append Apply postings to the Sheet
@@ -215,9 +217,9 @@ agent, and writes into the packet:
 - `resume_changelog.md` — one addressable entry per change with its
   rationale, rendered from the patch that was actually applied.
 
-The model (pinned `claude-opus-4-8`) never edits a file: it sees every
-template in the library (one maintained resume per role family) as numbered
-paragraphs, picks the one whose family fits the posting — the pick and its
+The model (pinned `claude-fable-5`, medium effort) never edits a file: it
+sees every template in the library (one maintained resume per role family) as
+numbered paragraphs, picks the one whose family fits the posting — the pick and its
 rationale land in the changelog — and submits **structured JSON patches**
 (replace / insert / delete / move per paragraph, `**bold**` inline) to an
 in-process `render_resume` tool. The tool applies each patch
@@ -249,6 +251,24 @@ Requires the `resume_templates/` library at the repo root (gitignored — one
 uv run jsa generate --dry-run  # preview the queue
 uv run jsa generate            # tailor + track everything queued
 uv run jsa generate --id 42    # one row, even if already tracked
+```
+
+### Maintaining the bullet library
+
+`resume_bullets.csv` — living beside the packet directories — is the
+reconciled record of every bullet across every resume actually sent: one row
+per bullet, organized by employer role, with a canonical `best` wording per
+claim and substantively different framings kept as variants. `jsa generate`
+feeds it to the tailoring model as ground truth, so new resumes reuse vetted
+claims instead of re-paraphrasing them. `jsa bullets` keeps it current: it
+scans for resume files modified since the last recorded sync run (tracked in
+the database, like the refinement loop) and has a headless agent (pinned
+`claude-sonnet-5`, medium effort) fold the missing bullets into the CSV.
+
+```bash
+uv run jsa bullets --dry-run   # list the resumes in scope
+uv run jsa bullets             # fold their bullets into the library
+uv run jsa bullets --baseline  # mark the current state as synced (after hand-curation)
 ```
 
 ### Refining the search prompt from ground truth

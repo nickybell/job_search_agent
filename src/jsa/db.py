@@ -104,6 +104,23 @@ _REFINEMENT_RUNS_SCHEMA = (
     f"CREATE TABLE IF NOT EXISTS prompt_refinement_runs ({_REFINEMENT_RUNS_COLUMNS})"
 )
 
+# One row per bullet-library sync run (prd.md, Resume Revisions). The same
+# incrementality-in-the-database pattern as prompt_refinement_runs, with
+# resume-file mtimes standing in for decided_at: MAX(run_at) is the cutoff the
+# next `jsa bullets` scopes against. A run is recorded only on success (an
+# errored run records nothing, so its resumes are reconsidered), and
+# `jsa bullets --baseline` records a row without a model call to seed the
+# cutoff after a hand-build. ``id``, as above, keeps rows individually
+# deletable over the Hrana/HTTP transport.
+_BULLET_RUNS_COLUMNS = """
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    considered INTEGER NOT NULL,
+    changed    INTEGER NOT NULL DEFAULT 0
+"""
+
+_BULLET_RUNS_SCHEMA = f"CREATE TABLE IF NOT EXISTS bullet_sync_runs ({_BULLET_RUNS_COLUMNS})"
+
 
 @dataclass
 class NewPosting:
@@ -152,7 +169,7 @@ def connect(config: Config) -> Connection:
 
 
 def init_db(client: Connection) -> None:
-    """Create the ``postings`` and ``search_findings`` tables, then migrate.
+    """Create the ``postings`` table and its satellite tables, then migrate.
 
     Every command that touches the database calls this, so the migration below
     is applied the first time an existing database is opened by a build that
@@ -167,6 +184,7 @@ def init_db(client: Connection) -> None:
     client.execute(_SCHEMA)
     client.execute(_FINDINGS_SCHEMA)
     client.execute(_REFINEMENT_RUNS_SCHEMA)
+    client.execute(_BULLET_RUNS_SCHEMA)
 
 
 def migrate_postings_schema(client: Connection) -> bool:
@@ -628,5 +646,19 @@ def record_refinement_run(client: Connection, *, considered: int, changed: bool)
     """
     client.execute(
         "INSERT INTO prompt_refinement_runs (considered, changed) VALUES (?, ?)",
+        (considered, 1 if changed else 0),
+    )
+
+
+def bullet_sync_cutoff(client: Connection) -> str | None:
+    """The last bullet-library sync run's ``run_at`` — the next run's mtime cutoff."""
+    row = client.execute("SELECT MAX(run_at) FROM bullet_sync_runs").fetchone()
+    return row[0] if row else None
+
+
+def record_bullet_run(client: Connection, *, considered: int, changed: bool) -> None:
+    """Log one bullet sync run; its ``run_at`` becomes the next run's cutoff."""
+    client.execute(
+        "INSERT INTO bullet_sync_runs (considered, changed) VALUES (?, ?)",
         (considered, 1 if changed else 0),
     )
