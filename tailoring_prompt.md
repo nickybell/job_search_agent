@@ -58,6 +58,31 @@ not limited to the facts in the chosen template alone.
 
 {{RESUME_TEMPLATES}}
 
+## Bullet ground-truth library
+
+The CSV below (when present) is the **reconciled universe of claims** across
+every resume actually sent: one row per bullet, organized by employer role,
+with columns `employer_role, claim, version, categories, bullet,
+source_resumes, notes`. A `best` row is the canonical wording of its claim;
+`variant` rows are substantively different framings of the same claim, tagged
+with the role categories (`enablement`, `education`, `customer-success`,
+`cs-ops`, `other`) they have served.
+
+Treat it as ground truth alongside the templates:
+
+- When a claim you want already exists in the library, **reuse the library
+  wording** — the `best` version by default, or the variant whose categories
+  match this posting's role family — rather than re-paraphrasing from
+  scratch. These wordings are vetted; fresh paraphrases drift.
+- The verified-facts rules extend to the library: you may draw on any fact in
+  it, and you must never contradict it or escalate a claim beyond it.
+- The variants show how the same claim is framed per role category — use them
+  as the model for which facet to foreground here.
+- It is a reference, not a quota: a bullet belongs in this resume only if it
+  serves this posting.
+
+{{BULLET_LIBRARY}}
+
 ## How you work: the render loop
 
 Your output is not a block of prose — it is a **patch** you submit to the

@@ -22,7 +22,7 @@ from datetime import datetime
 
 import click
 
-from . import db, generate, packet, prompting
+from . import bullets, db, generate, packet, prompting
 from .config import load_config
 from .manual import ManualAddError, add_posting
 from .pipeline import run_pipeline, schedule_for_date
@@ -332,6 +332,48 @@ def generate_command(posting_id: int | None, dry_run: bool) -> None:
     click.echo(str(summary))
     if summary.failed or summary.track_failed:
         raise SystemExit(1)
+
+
+@main.command("bullets")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="List the resumes in scope without running the model or recording a run.",
+)
+@click.option(
+    "--baseline",
+    is_flag=True,
+    default=False,
+    help="Record the current resumes as already synced, without running the model.",
+)
+def bullets_command(dry_run: bool, baseline: bool) -> None:
+    """Fold bullets from newly tailored resumes into the ground-truth library.
+
+    Considers resume files modified since the last recorded sync run and has
+    a headless agent add their missing bullets to ``resume_bullets.csv`` — the
+    reconciled universe of claims ``jsa generate`` tailors from. Run
+    ``--baseline`` once after building or hand-curating the library so the
+    next run starts incremental.
+    """
+    _configure_logging()
+    config = load_config()
+    try:
+        summary = bullets.run_bullets(config, dry_run=dry_run, baseline=baseline)
+    except bullets.BulletSyncError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if dry_run:
+        return
+    if summary.baseline:
+        click.echo(f"Baseline recorded — {summary.considered} resume(s) marked as synced.")
+        return
+    if summary.considered == 0:
+        click.echo("No resumes modified since the last bullet sync.")
+        return
+    if summary.changed:
+        click.echo(f"Bullet library updated from {summary.considered} resume(s).")
+    else:
+        click.echo(f"{summary.considered} resume(s) reviewed — no new bullets to add.")
 
 
 @main.command("refine")
