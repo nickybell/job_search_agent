@@ -255,6 +255,12 @@ uv run jsa generate --id 42    # one row, even if already tracked
 
 ### Maintaining the bullet library
 
+`resume_voice.md` — beside the packet directories, hand-curated — holds
+summaries Nicky wrote himself for earlier applications. `jsa generate`
+interpolates it into the tailoring prompt as the register to match, so the
+summary reads like him rather than like a model; the prompt also caps the
+summary's length and bans the constructions his hand edits always removed.
+
 `resume_bullets.csv` — living beside the packet directories — is the
 reconciled record of every bullet across every resume actually sent: one row
 per bullet, organized by employer role, with a canonical `best` wording per

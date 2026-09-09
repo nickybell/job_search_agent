@@ -31,6 +31,12 @@ override), maintained by ``jsa bullets`` (see ``bullets.py``) — so revisions
 reuse the canonical, vetted wording of every claim already sent. A missing
 library degrades to a logged warning, never a failed run.
 
+It likewise interpolates the voice samples — ``resume_voice.md`` in the
+packets directory (``JSA_VOICE_DOC`` to override), a hand-curated file of
+summaries the user wrote for earlier applications — as ``{{VOICE_SAMPLES}}``,
+so the summary is written in the user's register rather than the model's. A
+missing file degrades the same way.
+
 A row with no captured JD is never tailored blind: its directory is ensured,
 but the tailoring and the tracker call are skipped and the row stays in the
 queue (``jsa refetch --id`` is the usual fix). The escape hatch: a
@@ -200,7 +206,26 @@ def resume_file_stem(normalized_company: str, title_slug: str) -> str:
 
 def load_bullet_library() -> str | None:
     """The bullet ground-truth CSV's raw text, or None when it does not exist yet."""
-    path = bullet_library_path()
+    return _read_optional(bullet_library_path())
+
+
+VOICE_FILENAME = "resume_voice.md"
+
+
+def voice_samples_path() -> Path:
+    """Where the voice samples live: the packets directory, or ``JSA_VOICE_DOC``."""
+    override = os.environ.get("JSA_VOICE_DOC")
+    if override:
+        return Path(override)
+    return packets_dir() / VOICE_FILENAME
+
+
+def load_voice_samples() -> str | None:
+    """The hand-curated voice samples' raw text, or None when the file is absent."""
+    return _read_optional(voice_samples_path())
+
+
+def _read_optional(path: Path) -> str | None:
     if not path.is_file():
         return None
     text = path.read_text(encoding="utf-8").strip()
@@ -214,6 +239,7 @@ def load_tailoring_prompt(
     jd_markdown: str,
     templates_text: str,
     bullet_library: str | None = None,
+    voice_samples: str | None = None,
     path: Path | None = None,
 ) -> str:
     """Read the tailoring prompt template and fill its per-job slots."""
@@ -225,6 +251,7 @@ def load_tailoring_prompt(
         .replace("{{JOB_DESCRIPTION}}", jd_markdown)
         .replace("{{RESUME_TEMPLATES}}", templates_text)
         .replace("{{BULLET_LIBRARY}}", bullet_library or "(no bullet library available)")
+        .replace("{{VOICE_SAMPLES}}", voice_samples or "(no voice samples available)")
     )
 
 
@@ -484,6 +511,13 @@ def run_generate(
                 "ground truth (build it, then seed with `jsa bullets --baseline`)",
                 bullet_library_path(),
             )
+        voice_samples = load_voice_samples()
+        if voice_samples is None:
+            log.warning(
+                "no voice samples at %s — the summary will be written without the "
+                "user's register to match",
+                voice_samples_path(),
+            )
         prompt_path = _default_prompt_path()
         if not prompt_path.is_file():
             raise GenerateError(f"tailoring prompt not found at {prompt_path}.")
@@ -503,6 +537,7 @@ def run_generate(
                 templates,
                 templates_text,
                 bullet_library,
+                voice_samples,
                 prompt_path,
                 tailor,
                 track_lock,
@@ -550,6 +585,7 @@ def _generate_one(
     templates: dict[str, Path],
     templates_text: str,
     bullet_library: str | None,
+    voice_samples: str | None,
     prompt_path: Path,
     tailor: TailorFn,
     track_lock: threading.Lock,
@@ -588,6 +624,7 @@ def _generate_one(
             jd_markdown=jd,
             templates_text=templates_text,
             bullet_library=bullet_library,
+            voice_samples=voice_samples,
             path=prompt_path,
         )
         stem = resume_file_stem(normalized_company, title_slug)

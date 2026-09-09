@@ -238,26 +238,60 @@ flow with a comma or preposition, never a dash-set aside.
 
 **Summary section principles**:
 
-This is a statement of the candidate's WAR (wins-above-replacement): what does
-the employer uniquely gain by hiring *you* instead of the average alternative
-who also clears the bar? WAR is **not** a list of the skills the posting asks
-for — every serious applicant will claim those. It is how the candidate
-*applies* that skillset to be better than the replacement at this specific
-position: the judgment, the track record, the distinctive angle that makes them
-uniquely interesting. Lead with that. Make the argument as an **identity
-credential, not a tool list**: "Formerly a data scientist, I speak my
-customers' language" beats "I know SQL, Snowflake, Databricks, and BI
-dashboards" — the identity claim is credible and hard for the average
-applicant to copy, while the enumeration belongs in the Skills section, not
-here. Mirror the posting's *substance*, but do
-not dilute the summary into a paraphrase of the job description — a summary
-that could have been written by reading only the posting has thrown away the
-candidate's edge. Keep the candidate's own credible voice and the concrete
-proof only they can claim out in front. When the role sits outside the
-candidate's direct domain experience (e.g., a UX role coming from a growth
-marketing background), lead with the domain-transfer argument — the one or two sentences connecting their background to the
-company's problem. It is the strongest card a domain-changer holds; play it
-first.
+The summary is written in the candidate's voice, not the posting's. It is a
+statement of WAR (wins-above-replacement): what the employer gains by hiring
+*this* candidate over the average applicant who also clears the bar. WAR is
+**not** a list of the skills the posting asks for — every serious applicant
+will claim those. Make the argument as an **identity credential**
+("Formerly a data scientist, I speak my customers' language"; "As a Chief of
+Staff and founding team member at scaling startups, I owned the operating
+rhythm behind aggressive renewal targets"), never as a tool list and never as
+the job description rewritten in the first person. When the role sits outside
+the candidate's direct domain experience, lead with the domain-transfer
+argument — the sentence connecting their background to the company's problem.
+It is the strongest card a domain-changer holds; play it first.
+
+Hard constraints. Check the rendered summary against each before you finish:
+
+- **At most three sentences and about 60 words; 75 is the ceiling.** The
+  template summaries already run long, so tailoring should usually make the
+  summary shorter, not longer.
+- **No responsibilities sentence.** A sentence that lists three or more
+  things the posting asks for ("I run cross-functional programs, architect
+  knowledge ecosystems, and build AI-enabled tools that make human and AI
+  agents more capable") is the job description rewritten as "I". Delete it;
+  the bullets carry that evidence. The summary may borrow at most one phrase
+  from the posting, and only where the candidate's own bullets already prove
+  it.
+- **No contrast constructions.** Never "rather than X", "not X but Y",
+  "unlike most CSMs", "not just what they know". State the claim; do not
+  stage it against a foil.
+- **No product, vendor, or metric names.** A short domain parenthetical is
+  fine ("technical depth (data science, agentic AI, cloud/DevOps)"). SQL,
+  Snowflake, Databricks, NDR, and OKRs belong in Skills or the bullets.
+- **Identity in a few words, proof in the body.** Name the credential
+  ("brought an FDA-cleared AI medical device to market"); do not narrate the
+  bullet behind it ("wrote FDA-cleared analysis under an externally audited
+  bar"). If a summary clause reads like a bullet, it is one: move it or drop
+  it.
+
+The shape that works: (1) one plain sentence saying who the candidate is for
+this role, either a short headline or a first-person thesis ("I build the
+machine that makes a CS team bigger than its headcount."); the "13+ years"
+opener is optional, not required; (2) the identity credential and what it
+lets the candidate do; (3) "I pair X with Y", "I live between A, B, and C",
+or a plain list of things actually done ("I've onboarded customers, led
+technical demos, and learned complex regulated domains fast."). Write like
+the candidate's own prose: first person, declarative sentences, everyday
+verbs (ran, built, hired, learned fast) over resume verbs (owned,
+architected, orchestrated, drove) unless the plain verb understates what
+happened.
+
+**Voice samples.** The summaries below (when present) were written by the
+candidate for earlier applications. They are the register to match — not
+text to copy, and not a length target beyond the constraints above.
+
+{{VOICE_SAMPLES}}
 
 **Bullet point principles:**
 
@@ -329,7 +363,12 @@ resume.
 - Do not fabricate experience or skills the candidate doesn't have.
 - Do not use generic buzzwords that aren't backed by specific experience.
 - Do not exceed two pages (the render loop is how you verify this).
-- Do not change job titles or dates.
+- Do not change job titles or dates, with one scoped exception: the Keywell
+  title. It must always include "Chief of Staff"; the customer-success half
+  is optional and may be dropped for a posting it does not serve. When kept,
+  "Customer Success Lead" is the most accurate wording, and minor variations
+  of it ("Customer Success Manager", ordering the two halves either way) are
+  allowed to fit the posting. Never invent a third role for that title.
 - Do not remove a role except as the last-resort page-budget move (see Page
   Budget), and never leave a kept role with only one bullet.
 - Do not assume anything about the candidate's business, scope, or
