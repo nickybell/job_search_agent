@@ -67,7 +67,10 @@ _SCHEMA = f"CREATE TABLE IF NOT EXISTS postings ({_POSTINGS_COLUMNS})"
 # a req — the overlap an A/B comparison most wants. search_findings records one
 # row per (run_date, agent, canonical_url) for EVERY posting an agent returns,
 # whether or not the postings insert no-ops, so both agents get credit for a
-# shared find. This is search telemetry, not application state.
+# shared find. This is search telemetry, not application state. ``decision`` is
+# denormalized from postings (kept current by ``sync_finding_decision``) rather
+# than joined at report time, so Apply precision survives a postings row being
+# deleted or reset to undecided (CLAUDE.md, customer-enablement scope cleanup).
 _FINDINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS search_findings (
     run_date      TEXT    NOT NULL,
@@ -76,6 +79,7 @@ CREATE TABLE IF NOT EXISTS search_findings (
     window_hours  INTEGER NOT NULL,
     rank          INTEGER,
     found_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    decision      TEXT    CHECK (decision IN ('Apply', 'Skip')),
     PRIMARY KEY (run_date, agent, canonical_url)
 )
 """
@@ -181,6 +185,7 @@ def init_db(client: Connection) -> None:
     # rows. Migrating first means the create only ever fires on a truly new DB.
     migrate_postings_schema(client)
     migrate_refinement_runs_schema(client)
+    migrate_search_findings_schema(client)
     client.execute(_SCHEMA)
     client.execute(_FINDINGS_SCHEMA)
     client.execute(_REFINEMENT_RUNS_SCHEMA)
@@ -276,6 +281,33 @@ def migrate_refinement_runs_schema(client: Connection) -> bool:
     client.execute("ALTER TABLE prompt_refinement_runs RENAME TO prompt_refinement_runs_pre_id")
     client.execute("ALTER TABLE prompt_refinement_runs_migrated RENAME TO prompt_refinement_runs")
     client.execute("DROP TABLE prompt_refinement_runs_pre_id")
+    return True
+
+
+def migrate_search_findings_schema(client: Connection) -> bool:
+    """Add the ``decision`` column to a pre-existing ``search_findings``.
+
+    search_findings is append-only A/B search telemetry, joined to ``postings``
+    by ``canonical_url`` for the Apply-precision report. That join breaks once a
+    postings row is deleted or reset to undecided — which the customer-
+    enablement scope cleanup (CLAUDE.md) does deliberately — so the decision is
+    denormalized onto search_findings itself, kept current by
+    ``sync_finding_decision`` rather than read live off ``postings``. A plain
+    ``ALTER TABLE ADD COLUMN`` suffices: this is a brand-new column, not an
+    existing CHECK constraint being widened, so no rebuild is needed. Returns
+    True if it ran, False if the table doesn't exist yet or is already current.
+    """
+    row = client.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_findings'"
+    ).fetchone()
+    if row is None:
+        return False
+    sql = row[0] or ""
+    if "decision" in sql:
+        return False
+    client.execute(
+        "ALTER TABLE search_findings ADD COLUMN decision TEXT CHECK (decision IN ('Apply', 'Skip'))"
+    )
     return True
 
 
@@ -409,12 +441,47 @@ def record_decision(
 
     ``decided_at`` is refreshed on every write — first decisions and in-session
     amendments alike — so the prompt-refinement loop's "new since the last
-    run" scope sees amended rows again.
+    run" scope sees amended rows again. Also propagates the decision to
+    ``search_findings`` (see ``sync_finding_decision``).
+    """
+    cursor = client.execute(
+        "UPDATE postings SET decision = ?, fit_feedback = ?, decided_at = datetime('now') "
+        "WHERE id = ? RETURNING canonical_url",
+        (decision, fit_feedback, posting_id),
+    )
+    row = cursor.fetchone()
+    if row is not None:
+        sync_finding_decision(client, row[0], decision)
+
+
+def clear_decision(client: Connection, posting_id: int) -> None:
+    """Reset a posting to undecided, e.g. to re-enter the Step 3 backlog.
+
+    Clears ``decision``, ``fit_feedback``, and ``decided_at`` together — a row
+    with no decision has nothing to date. Deliberately does *not* touch
+    ``search_findings``: clearing isn't a new decision, it's un-making the old
+    one, so the last real Apply/Skip call stays there as the historical record
+    (search-quality evaluation should still see it) until the posting is
+    actually re-decided, which re-syncs it via ``record_decision``.
     """
     client.execute(
-        "UPDATE postings SET decision = ?, fit_feedback = ?, decided_at = datetime('now') "
-        "WHERE id = ?",
-        (decision, fit_feedback, posting_id),
+        "UPDATE postings SET decision = NULL, fit_feedback = NULL, decided_at = NULL WHERE id = ?",
+        (posting_id,),
+    )
+
+
+def sync_finding_decision(client: Connection, canonical_url: str, decision: str) -> None:
+    """Propagate a postings decision onto every matching ``search_findings`` row.
+
+    Matched on ``canonical_url`` rather than a posting id — search_findings has
+    no foreign key to postings by design (it must outlive a deleted or reset
+    posting) — so every finding event for the same req (both agents, multiple
+    run_dates) picks up the same decision. Called from ``record_decision`` and
+    ``set_decision``, never from ``clear_decision``.
+    """
+    client.execute(
+        "UPDATE search_findings SET decision = ? WHERE canonical_url = ?",
+        (decision, canonical_url),
     )
 
 
@@ -518,12 +585,17 @@ def set_decision(client: Connection, posting_id: int, decision: str) -> None:
     job-add path may upgrade a row the user already reviewed: the note they
     wrote about it is still worth keeping, and is still ground-truth material.
     ``decided_at`` is refreshed — a promotion is a new decision, so the row
-    re-enters the prompt-refinement scope.
+    re-enters the prompt-refinement scope. Also propagates the decision to
+    ``search_findings`` (see ``sync_finding_decision``).
     """
-    client.execute(
-        "UPDATE postings SET decision = ?, decided_at = datetime('now') WHERE id = ?",
+    cursor = client.execute(
+        "UPDATE postings SET decision = ?, decided_at = datetime('now') WHERE id = ? "
+        "RETURNING canonical_url",
         (decision, posting_id),
     )
+    row = cursor.fetchone()
+    if row is not None:
+        sync_finding_decision(client, row[0], decision)
 
 
 def record_finding(
@@ -553,13 +625,16 @@ def record_finding(
 
 
 def ab_report(client: Connection) -> dict:
-    """Compute the A/B comparison from ``search_findings`` joined to ``postings``.
+    """Compute the A/B comparison from ``search_findings`` alone.
 
     Attribution lives in the append-only ``search_findings`` log, not the
     ``postings`` row's ``search_agent`` (which records only the first inserter),
     so a req both agents found credits both. Returns coverage (distinct reqs per
     agent), overlap (both / claude-only / perplexity-only), and per-agent Apply
-    precision (the single ``postings.decision`` fanned out to every finder).
+    precision, read from search_findings' own denormalized ``decision`` column
+    (kept current by ``sync_finding_decision``) rather than joined to
+    ``postings`` — a req whose postings row was later deleted or reset still
+    counts correctly.
     """
     coverage = client.execute(
         "SELECT agent, COUNT(DISTINCT canonical_url) "
@@ -581,12 +656,11 @@ def ab_report(client: Connection) -> dict:
     ).fetchone()
     precision = client.execute(
         """
-        SELECT f.agent,
-          SUM(CASE WHEN pst.decision = 'Apply' THEN 1 ELSE 0 END) AS applies,
-          SUM(CASE WHEN pst.decision IN ('Apply', 'Skip') THEN 1 ELSE 0 END) AS decided
-        FROM search_findings f
-        JOIN postings pst ON pst.canonical_url = f.canonical_url
-        GROUP BY f.agent ORDER BY f.agent
+        SELECT agent,
+          SUM(CASE WHEN decision = 'Apply' THEN 1 ELSE 0 END) AS applies,
+          SUM(CASE WHEN decision IN ('Apply', 'Skip') THEN 1 ELSE 0 END) AS decided
+        FROM search_findings
+        GROUP BY agent ORDER BY agent
         """
     ).fetchall()
     return {"coverage": coverage, "overlap": overlap, "precision": precision}
