@@ -76,17 +76,33 @@ reasoning live in `prd.md`; what happened lives in the git log.
   keeps happening.
 
 - [ ] **Decide whether cybersecurity is a vertical Nicky wants down-weighted.**
-  Ground truth is contradictory, so nothing was encoded. Two skips lean on it
-  (RegScale id 65, "didn't understand the lingo" of a GRC/CCM product;
+  Ground truth is contradictory, so nothing was encoded. Three skips now lean
+  on it (RegScale id 65, "didn't understand the lingo" of a GRC/CCM product;
   Corelight id 78, "I really don't find cybersecurity interesting... I've
-  rejected a number of cybersecurity jobs to date") — but RSA Security id 41
-  was an **Apply** ("I find the vertical (security) pretty uninteresting, but
-  this is such a close fit... worth getting the reps in"). A hard exclusion
-  would false-negative the RSA case; even a negative signal is questionable
-  since role fit clearly overrode the vertical there. Left for the user: is
-  cybersecurity a soft deprioritize (encode as a negative signal), or is it
-  pure review-time judgment that should stay out of the prompt? Needs an
-  explicit call, not a mined guess.
+  rejected a number of cybersecurity jobs to date"; Horizon3.ai id 87,
+  "Not interested in cybersecurity domains" — and notably a strong-fit
+  "Senior Customer Enablement Manager" role, so vertical disinterest alone
+  drove the skip) — but RSA Security id 41 was an **Apply** ("I find the
+  vertical (security) pretty uninteresting, but this is such a close fit...
+  worth getting the reps in"). A hard exclusion would false-negative the RSA
+  case; even a negative signal is questionable since role fit clearly overrode
+  the vertical there. Left for the user: is cybersecurity a soft deprioritize
+  (encode as a negative signal), or is it pure review-time judgment that should
+  stay out of the prompt? Needs an explicit call, not a mined guess.
+
+- [ ] **Decide whether frontier AI labs / most-prestigious employers should be
+  down-weighted for a career-pivoter.** Two skips this round turned solely on
+  company prestige plus self-assessed competitiveness, not role fit: Anthropic
+  id 52 ("I'm skeptical that I would be competitive at a tier 1 company like
+  Anthropic, given that I am job-switching") and OpenAI id 69 ("I just really
+  doubt that as a pivoter/career synthesizer I'm going to be competitive at a
+  Tier 1 company like OpenAI") — the OpenAI role was a strong enablement fit in
+  a target location (DC). Not encoded: "tier 1" is subjective and not
+  posting-verifiable, and other large / high-profile employers were **Apply**
+  (Databricks id 92, multiple GitLab reqs), so "big or well-known company →
+  skip" is plainly false. If the user wants this, it needs an explicit,
+  bounded definition (which specific companies?), not a mined guess — and even
+  then it trades recall for precision on roles that are otherwise dead-center.
 
 - [ ] **Publish the repo** as a public portfolio piece on your personal
   GitHub account — after the credential rotation above. `base_resume.docx`,
