@@ -28,26 +28,19 @@ hand-curated).
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-import anyio
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ResultMessage,
-    TextBlock,
-    query,
-)
+from claude_agent_sdk import ClaudeAgentOptions
 from docx import Document
 
 from . import db
+from .agent import prompt_path, run_agent
 from .config import Config
 from .docx_patch import iter_paragraphs
-from .packet import packets_dir
+from .packet import packets_dir, vault_file
 
 log = logging.getLogger(__name__)
 
@@ -67,25 +60,9 @@ class BulletSyncError(RuntimeError):
     """A precondition failed loudly, or the headless sync run ended in an error."""
 
 
-def _repo_root() -> Path:
-    # src/jsa/bullets.py -> repo root is two parents up from src/jsa.
-    return Path(__file__).resolve().parents[2]
-
-
-def _default_prompt_path() -> Path:
-    """Locate ``bullet_sync_prompt.md`` (repo root, same pattern as the other prompts)."""
-    cwd_candidate = Path.cwd() / _PROMPT_FILENAME
-    if cwd_candidate.is_file():
-        return cwd_candidate
-    return _repo_root() / _PROMPT_FILENAME
-
-
 def bullet_library_path() -> Path:
     """The bullet ground-truth CSV — in the vault beside the resumes it indexes."""
-    override = os.environ.get("JSA_BULLETS_DOC")
-    if override:
-        return Path(override)
-    return packets_dir() / BULLETS_FILENAME
+    return vault_file("JSA_BULLETS_DOC", BULLETS_FILENAME)
 
 
 def is_resume_docx(name: str) -> bool:
@@ -154,14 +131,19 @@ def render_resume_blocks(paths: list[Path]) -> str:
 
 def load_bullet_sync_prompt(*, library_path: Path, resumes: str, path: Path | None = None) -> str:
     """Read the sync instructions and fill the library-path and resumes slots."""
-    path = path or _default_prompt_path()
+    path = path or prompt_path(_PROMPT_FILENAME)
     text = path.read_text(encoding="utf-8")
     return text.replace("{{BULLET_LIBRARY_PATH}}", str(library_path)).replace(
         "{{RESUMES}}", resumes
     )
 
 
-async def _agent(prompt: str) -> str:
+def run_sync_agent(prompt: str) -> str:
+    """One headless SDK run over the vault; returns the final message.
+
+    An error result raises ``BulletSyncError`` before the run is recorded, so
+    its resumes are reconsidered on the next invocation.
+    """
     options = ClaudeAgentOptions(
         model=MODEL,
         effort=EFFORT,
@@ -172,32 +154,7 @@ async def _agent(prompt: str) -> str:
         cwd=str(bullet_library_path().parent),
         max_turns=_MAX_TURNS,
     )
-    final_text = ""
-    assistant_text: list[str] = []
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_text.append(block.text)
-        elif isinstance(message, ResultMessage):
-            # Same detection as the refiner: an API error that outlived the
-            # CLI's own retries still arrives as subtype "success" with
-            # is_error set. Raising leaves the run unrecorded, so its resumes
-            # are reconsidered on the next invocation.
-            if message.is_error:
-                status = message.api_error_status
-                detail = (message.result or "").strip() or message.subtype
-                where = f" (API error HTTP {status})" if status else ""
-                raise BulletSyncError(f"bullet sync agent failed{where}: {detail}")
-            final_text = message.result or ""
-            if message.total_cost_usd is not None:
-                log.info("bullet sync agent finished ($%.4f)", message.total_cost_usd)
-    return final_text or (assistant_text[-1] if assistant_text else "")
-
-
-def run_sync_agent(prompt: str) -> str:
-    """One headless SDK run over the vault; returns the final message."""
-    return anyio.run(_agent, prompt)
+    return run_agent(prompt, options, BulletSyncError, "bullet sync agent")
 
 
 @dataclass

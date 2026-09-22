@@ -1,8 +1,9 @@
 """Claude Deep Research search via the Claude Agent SDK.
 
-Run headless on the cron with ``claude-opus-4-8`` at high effort — long-horizon
-agentic web research with hard liveness gates rewards Opus-tier
-instruction-following (see the rationale in ``prd.md``). The runner drives the
+Run headless on the cron with ``claude-opus-4-8`` at ``xhigh`` effort —
+long-horizon agentic web research with hard liveness gates rewards Opus-tier
+instruction-following, and lower effort consolidates or skips the tool calls
+that exhaustive source-checking depends on (see the rationale in ``prd.md``). The runner drives the
 SDK's web tools and returns the model's final text, which ``parse.py`` then
 validates.
 
@@ -33,6 +34,7 @@ from claude_agent_sdk import (
 log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-4-8"
+EFFORT = "xhigh"
 # Web research over many sources with per-posting ATS list-endpoint checks needs
 # generous turn headroom.
 _MAX_TURNS = 120
@@ -108,8 +110,8 @@ def _log_result(message: ResultMessage) -> None:
 async def _run(prompt: str) -> str:
     options = ClaudeAgentOptions(
         model=MODEL,
-        # xhigh is Opus's default effort in the harness; pin the model and let
-        # the web tools run without interactive permission prompts.
+        effort=EFFORT,
+        # The web tools run without interactive permission prompts.
         allowed_tools=["WebSearch", "WebFetch"],
         permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
@@ -117,7 +119,12 @@ async def _run(prompt: str) -> str:
 
     final_text = ""
     assistant_text: list[str] = []
-    log.info("Claude Deep Research starting (model=%s, max_turns=%d)", MODEL, _MAX_TURNS)
+    log.info(
+        "Claude Deep Research starting (model=%s, effort=%s, max_turns=%d)",
+        MODEL,
+        EFFORT,
+        _MAX_TURNS,
+    )
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
             for block in message.content:

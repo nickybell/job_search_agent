@@ -1,17 +1,17 @@
 """Step 5: elevate ``Apply`` postings into the Google Sheet tracker.
 
-The relationship (reframed 2026-08-16): **the database is the source of truth
-for posting data; the Sheet is its human-readable projection plus Nicky's
-workspace.** Concretely, the Sheet's columns split into two classes. The
-agent-written columns (ID, Company, Title, URL, Date Posted, Date Added) are a
-view of the ``postings`` row — the agent appends them here and ``jsa refetch``
-refreshes the Title cell when the underlying row changes (``update_title``).
-The user columns (Date Applied, Status) are written only by Nicky; they are
-the one application state the system keeps, deliberately unmirrored into
-Turso, and the agent touches them in exactly one way: ``read_tracker_index``
-reads Date Applied so refetch can scope itself to postings not yet applied to.
-Authority never flows Sheet → database for posting data, and no agent write
-ever lands in a user column.
+The relationship: **the database is the source of truth for posting data; the
+Sheet is its human-readable projection plus the user's workspace.** Concretely,
+the Sheet's columns split into two classes. The agent-written columns (ID,
+Company, Title, URL, Date Posted, Date Added) are a view of the ``postings``
+row — the agent appends them here and ``jsa refetch`` refreshes the Title cell
+when the underlying row changes (``update_title``). The user columns (Date
+Applied, Status) are written only by the user; they are the one application
+state the system keeps, deliberately unmirrored into Turso, and the agent
+touches them in exactly one way: ``read_tracker_index`` reads Date Applied so
+refetch can scope itself to postings not yet applied to. Authority never flows
+Sheet → database for posting data, and no agent write ever lands in a user
+column.
 
 **Idempotency** is the ``added_to_tracker`` column, exactly as the PRD
 specifies: the backlog query selects ``decision = 'Apply' AND added_to_tracker

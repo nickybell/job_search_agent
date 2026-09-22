@@ -12,18 +12,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from ..agent import prompt_path
+
 EASTERN = ZoneInfo("America/New_York")
 _PLACEHOLDER = "{{SEARCH_WINDOW}}"
 _PROMPT_FILENAME = "deep_research_prompt.md"
-
-
-def _default_prompt_path() -> Path:
-    """Locate ``deep_research_prompt.md`` (repo root in dev and in the container)."""
-    cwd_candidate = Path.cwd() / _PROMPT_FILENAME
-    if cwd_candidate.is_file():
-        return cwd_candidate
-    # src/jsa/search/prompt.py -> repo root is three parents up from src/jsa.
-    return Path(__file__).resolve().parents[3] / _PROMPT_FILENAME
 
 
 def format_search_window(window_hours: int, now: datetime | None = None) -> str:
@@ -40,6 +33,6 @@ def load_prompt(
     path: Path | None = None,
 ) -> str:
     """Read the template and substitute the search window."""
-    path = path or _default_prompt_path()
+    path = path or prompt_path(_PROMPT_FILENAME)
     text = path.read_text(encoding="utf-8")
     return text.replace(_PLACEHOLDER, format_search_window(window_hours, now))

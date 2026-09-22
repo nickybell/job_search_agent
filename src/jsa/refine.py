@@ -8,10 +8,10 @@ with file tools only, pinned to ``claude-opus-4-8`` at ``high`` effort — the
 task is bounded synthesis over a small corpus delta, not the exhaustive
 source-checking that justifies ``xhigh`` on the search side.
 
-**Incrementality lives in the database, not the prompt** (a hard preference,
-2026-08-22): each run considers only rows newer than the last recorded run in
-``prompt_refinement_runs`` — on the very first run that means every decided
-row, NULL ``decided_at`` included — and exits quietly when there are none.
+**Incrementality lives in the database, not the prompt**: each run considers
+only rows newer than the last recorded run in ``prompt_refinement_runs`` — on
+the very first run that means every decided row, NULL ``decided_at`` included
+— and exits quietly when there are none.
 The search prompt itself stays standalone — no watermarks, no ground-truth
 references — with oscillation across runs accepted; provenance
 lives in PR history. A run is recorded whether or not its PR merges (a
@@ -37,16 +37,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import anyio
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ResultMessage,
-    TextBlock,
-    query,
-)
+from claude_agent_sdk import ClaudeAgentOptions
 
 from . import db
+from .agent import REPO_ROOT, prompt_path, run_agent
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -65,25 +59,7 @@ RunnerFn = Callable[[str], str]
 
 
 class RefineAgentError(RuntimeError):
-    """The headless refiner run ended in an error result.
-
-    Most often a retryable API error (HTTP 429/500/529) that outlived the CLI's
-    own retries: it still arrives as a ``subtype="success"`` result with
-    ``is_error`` set, so it must be detected explicitly rather than by subtype.
-    """
-
-
-def _repo_root() -> Path:
-    # src/jsa/refine.py -> repo root is two parents up from src/jsa.
-    return Path(__file__).resolve().parents[2]
-
-
-def _default_prompt_path() -> Path:
-    """Locate ``refine_search_prompt.md`` (repo root, same pattern as the other prompts)."""
-    cwd_candidate = Path.cwd() / _PROMPT_FILENAME
-    if cwd_candidate.is_file():
-        return cwd_candidate
-    return _repo_root() / _PROMPT_FILENAME
+    """The headless refiner run ended in an error result (see ``agent.collect_final_text``)."""
 
 
 def render_ground_truth(rows: list[tuple]) -> str:
@@ -141,12 +117,17 @@ def render_history(history: list[tuple]) -> str:
 
 def load_refine_prompt(*, ground_truth: str, history: str, path: Path | None = None) -> str:
     """Read the refinement instructions and fill the two data slots."""
-    path = path or _default_prompt_path()
+    path = path or prompt_path(_PROMPT_FILENAME)
     text = path.read_text(encoding="utf-8")
     return text.replace("{{GROUND_TRUTH}}", ground_truth).replace("{{HISTORY}}", history)
 
 
-async def _agent(prompt: str) -> str:
+def run_refiner_agent(prompt: str) -> str:
+    """One headless SDK run over the checkout; returns the final message (the PR body).
+
+    An error result raises ``RefineAgentError`` before the run is recorded, so
+    its rows are reconsidered next run (the weekly cadence, or a manual re-run).
+    """
     options = ClaudeAgentOptions(
         model=MODEL,
         effort=EFFORT,
@@ -154,39 +135,10 @@ async def _agent(prompt: str) -> str:
         # the prompt, and the PR gate reviews every edit these tools make.
         allowed_tools=["Read", "Edit", "Grep", "Glob"],
         permission_mode="bypassPermissions",
-        cwd=str(_repo_root()),
+        cwd=str(REPO_ROOT),
         max_turns=_MAX_TURNS,
     )
-    final_text = ""
-    assistant_text: list[str] = []
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_text.append(block.text)
-        elif isinstance(message, ResultMessage):
-            # An error result (e.g. an API 429/500/529 that survived the CLI's
-            # own retries) still arrives as subtype "success" with is_error set,
-            # and the CLI then exits non-zero. Surface the real cause here — the
-            # HTTP status and the CLI's error text — instead of letting the SDK
-            # raise the opaque "returned an error result: success". Raising also
-            # leaves the run unrecorded, so its rows are reconsidered next run
-            # (the weekly cadence, or a manual workflow re-run).
-            if message.is_error:
-                status = message.api_error_status
-                detail = (message.result or "").strip() or message.subtype
-                where = f" (API error HTTP {status})" if status else ""
-                raise RefineAgentError(f"refinement agent failed{where}: {detail}")
-            final_text = message.result or ""
-            if message.total_cost_usd is not None:
-                log.info("refinement agent finished ($%.4f)", message.total_cost_usd)
-    # The final message is the PR body; fall back to the last assistant text.
-    return final_text or (assistant_text[-1] if assistant_text else "")
-
-
-def run_refiner_agent(prompt: str) -> str:
-    """One headless SDK run over the checkout; returns the final message."""
-    return anyio.run(_agent, prompt)
+    return run_agent(prompt, options, RefineAgentError, "refinement agent")
 
 
 def _changed_files() -> list[str]:
@@ -196,7 +148,7 @@ def _changed_files() -> list[str]:
             ["git", "diff", "--name-only"],
             capture_output=True,
             text=True,
-            cwd=_repo_root(),
+            cwd=REPO_ROOT,
             timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -268,7 +220,7 @@ def run_refine(
         summary.changed_files = [f for f in _changed_files() if f not in baseline]
 
         body = final_text.strip() or "(the refinement agent returned no summary)"
-        target = pr_body_path or (_repo_root() / PR_BODY_FILENAME)
+        target = pr_body_path or (REPO_ROOT / PR_BODY_FILENAME)
         target.write_text(body + "\n", encoding="utf-8")
         summary.pr_body_path = target
 

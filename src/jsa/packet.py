@@ -38,6 +38,12 @@ def packets_dir() -> Path:
     return Path(override) if override else DEFAULT_PACKETS_DIR
 
 
+def vault_file(env_var: str, filename: str) -> Path:
+    """A hand-curated file kept beside the packets, with an env-var override."""
+    override = os.environ.get(env_var)
+    return Path(override) if override else packets_dir() / filename
+
+
 def packet_dir_name(normalized_company: str, title_slug: str) -> str:
     """The prd.md packet-directory name. Pure; both inputs are already fs-safe."""
     return f"{normalized_company} - {title_slug}"

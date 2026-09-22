@@ -1,7 +1,7 @@
 """The direct job-add path: ingest one posting from a URL the user supplies.
 
-The PRD's Database section always assumed Nicky could hand the agent a posting
-directly; this is that route. It deliberately reuses Step 2 wholesale —
+The PRD's Database section always assumed the user could hand the agent a
+posting directly; this is that route. It deliberately reuses Step 2 wholesale —
 canonicalize → idempotent insert → full-JD fetch — rather than opening a second
 way into the table, so a hand-added row is indistinguishable downstream from a
 searched one and lands in the same Step 3 review backlog. The only difference
@@ -39,9 +39,8 @@ from dataclasses import dataclass
 import httpx
 
 from . import db, prompting
-from .ats import fetch_detail, fetch_jsonld_detail, resolve_ats_url
+from .ats import ATSDetail, fetch_detail, fetch_jsonld_detail, resolve_ats_url
 from .ats import to_markdown as jsonld_to_markdown
-from .ats.fetch import ATSDetail
 from .canonicalize import canonicalize_url
 from .config import Config
 from .naming import normalize_company, slugify_title

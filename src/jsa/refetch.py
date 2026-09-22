@@ -18,17 +18,17 @@ completely untouched rather than overwriting a good description with nothing
 -- the same degrade-don't-destroy stance, applied in the direction that
 matters here.
 
-Scope (decided 2026-08-16): only postings where drift could still change what
-Nicky does next -- ``decision = 'Apply'`` rows that are *either* absent from
+Scope: only postings where drift could still change what the user does next
+-- ``decision = 'Apply'`` rows that are *either* absent from
 the tracker Sheet *or* present with a blank Date Applied. That is an OR: being
 in the tracker does not exempt a job that has not actually been applied to.
 Once an application is out the door the row is skipped and its Sheet copy
 becomes a frozen record of what was submitted. If the Sheet index read fails
 in this default scope, the run fails loudly rather than guessing.
 
-The Sheet relationship follows the 2026-08-16 reframing (see ``tracker``): the
-database is the source of truth for posting data; the tracker is its
-human-readable projection plus the user's workspace. So when a title
+The Sheet relationship (see ``tracker``): the database is the source of truth
+for posting data; the tracker is its human-readable projection plus the user's
+workspace. So when a title
 correction lands on a row that sits in the Sheet unapplied, the projection
 follows -- ``tracker.update_title`` refreshes that one cell, DB first, Sheet
 second, and a failed Sheet write degrades to a flagged hand-fix rather than

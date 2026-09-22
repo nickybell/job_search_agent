@@ -80,8 +80,8 @@ why the posting was surfaced anyway (see the adherence audit below).
    postings on an ATS platform outside the supported four, which the search
    cannot emit by construction; hand-adding them is an ordinary part of the
    user's workflow, not a search defect, and with no JD there is nothing to
-   mine and nothing to encode. Skip the row silently — never open a `TODO.md`
-   item, and never flag it for follow-up.
+   mine and nothing to encode. Skip the row silently, and never flag it for
+   follow-up.
 2. **Mine the JDs for implicit patterns.** The ground truth includes each
    posting's full job description, so the decisions are labeled documents.
    Pattern-match across the Apply and Skip JDs for regularities the feedback
@@ -98,8 +98,8 @@ why the posting was surfaced anyway (see the adherence audit below).
    designed." For (c) the fix is salience, not redundancy: reposition,
    restate, or consolidate the ignored rule, or add a pre-emit self-check
    instruction to the search prompt — and where no wording change can
-   plausibly help, propose runner-side enforcement as a `TODO.md` checkbox
-   instead. One caveat: a row may have been decided under an older version
+   plausibly help, propose runner-side enforcement in the PR body's open
+   questions instead. One caveat: a row may have been decided under an older version
    of the prompt that predated the rule it seems to violate — weigh that
    before calling it an adherence failure.
 
@@ -127,13 +127,11 @@ why the posting was surfaced anyway (see the adherence audit below).
 1. Edits to `deep_research_prompt.md` (possibly none).
 2. A matching update to `prd.md` wherever it describes the search criteria —
    it is the source of truth and must not drift from the prompt.
-3. Anything too ambiguous to encode: a checkbox in `TODO.md` with your
-   reasoning.
-4. **Your final message = the PR body.** In it: a changelog of every edit
+3. **Your final message = the PR body.** In it: a changelog of every edit
    with the ground truth that motivated it; the manual-adds recall analysis;
    the adherence audit and its tallies; any implicit patterns you found,
    encoded or not; any promotion you are proposing, prominently flagged;
-   and open questions where
-   you saw genuine contradictions (an interactive session would have asked —
-   the PR body is where you ask instead). If you changed nothing, say so and
+   and open questions — genuine contradictions, and anything too ambiguous
+   to encode, each with your reasoning (an interactive session would have
+   asked; the PR body is where you ask instead). If you changed nothing, say so and
    why. Never describe an edit you did not actually make.

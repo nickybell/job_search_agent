@@ -1,10 +1,10 @@
 # Job Search Agent
 
-A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **recurring search** for Customer Enablement / Education / AI Enablement roles, stores each posting **exactly once** (with its full job description), and collects fit feedback through a fast terminal review loop.
+A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview), that runs a **recurring search** for in-scope roles, stores each posting **exactly once** with its full job description, collects fit feedback through a fast terminal review loop, and turns each `Apply` into a tailored resume packet and a tracker row.
 
-> This repository doubles as a portfolio example of building a real system with AI coding tools. The design was worked out as a written spec **before** any code: [`prd.md`](./prd.md) is the source of truth, [`TODO.md`](./TODO.md) tracks open decisions, and [`deep_research_prompt.md`](./deep_research_prompt.md) is the search prompt itself. See [How this was built](#how-this-was-built).
+> This repository doubles as a portfolio example of building a real system with AI coding tools. The design was worked out as a written spec **before** any code: [`prd.md`](./prd.md) holds every design decision and its rationale, and [`deep_research_prompt.md`](./deep_research_prompt.md) is the search prompt itself. This README covers how to run the system and how to make it yours; when a paragraph here leaves you asking *why*, the answer is in `prd.md`. See [How this was built](#how-this-was-built).
 
-**Running it for your own job search is the intended use** — everything personal to my search is gitignored or parameterized. [Using this for your own search](#using-this-for-your-own-search) is the four-item checklist.
+**Running it for your own job search is the intended use** — everything personal is gitignored or read from the environment. [Using this for your own search](#using-this-for-your-own-search) is the checklist.
 
 ## Status
 
@@ -12,19 +12,17 @@ A personal job-search agent, built on the [Claude Agent SDK](https://docs.claude
 
 | Step | What it does | Where it runs |
 | --- | --- | --- |
-| 1 | Daily job search — Perplexity Agent API deep research on Mon/Wed/Fri, plus a weekly Claude Deep Research sweep on Fridays | Fly.io cron (headless) |
+| 1 | Recurring job search — Perplexity Agent API deep research on Mon/Wed/Fri, plus a weekly Claude Deep Research sweep on Fridays | Fly.io cron (headless) |
 | 2 | Idempotent insert into Turso + full-JD capture from the posting's own ATS | Fly.io cron (headless) |
 | — | Direct job add: hand it a URL, it runs the same Step 2 machinery and is decided `Apply` | Local terminal |
 | 3 | Human-in-the-loop fit review (`Apply`/`Skip` + free-text feedback) | Local terminal |
 | 4 | Tailor a per-job resume from the `resume_templates/` library (a render-loop agent patches a template and verifies a two-page PDF budget) | Local terminal |
 | 5 | Append `Apply` postings to the Google Sheet application tracker (Step 4's final action) | Local terminal |
-| — | Ground-truth loop: a weekly PR proposing search-prompt refinements from fit feedback | GitHub Actions |
-
-The refinement instructions (`refine_search_prompt.md`) are a first version, revised in place as the ground-truth loop accumulates evidence; remaining setup items live in `TODO.md`.
+| — | Learning loops: a weekly PR proposing search-prompt refinements from fit feedback, and a bullet-library sync from the resumes actually sent | GitHub Actions / local |
 
 ## Architecture
 
-The system splits a **headless cloud runtime** (the daily search) from **interactive local sessions** (review), coordinated through one hosted database so neither side keeps a divergent copy.
+The system splits a **headless cloud runtime** (the recurring search) from **interactive local sessions** (review, resumes, tracker), coordinated through one hosted database so neither side keeps a divergent copy.
 
 ```mermaid
 flowchart LR
@@ -34,6 +32,7 @@ flowchart LR
     I -->|writes| DB[("Turso\nlibSQL")]
     DB -->|NULL decision queue| R["Step 3: review CLI\n(local, no LLM)"]
     R -->|Apply / Skip + feedback| DB
+    DB -->|Apply queue| G["Steps 4–5: resume packet\n+ tracker row (local)"]
 ```
 
 - **Fly.io** wakes a machine on schedule, runs one search, and stops — pennies per month.
@@ -49,36 +48,55 @@ uv sync                     # create the venv and install dependencies
 cp .env.example .env        # then fill in credentials (see below)
 ```
 
-Credentials (see `.env.example` for details): a Turso database URL + token, Claude auth for every Claude-driven step (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` on a subscription, or a pay-as-you-go `ANTHROPIC_API_KEY` — never both), a Perplexity API key (the recurring Mon/Wed/Fri search), and — for the Step 5 tracker write — your own Google Sheet's id in `JSA_TRACKER_SPREADSHEET_ID`.
+Credentials (see `.env.example` for details): a Turso database URL + token, Claude auth for every Claude-driven step (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` on a subscription, or a pay-as-you-go `ANTHROPIC_API_KEY` — never both), a Perplexity API key (the recurring Mon/Wed/Fri search), your own Google Sheet's id in `JSA_TRACKER_SPREADSHEET_ID` for the Step 5 tracker write, and your name in `JSA_CANDIDATE_NAME` for the resume file names. `.env.example` also lists the optional path and tooling overrides.
 
 ## Using this for your own search
 
-I built this for my search, but everything personal is gitignored or
-parameterized, so a clone is a working skeleton. Four things make it yours:
+A clone is a working skeleton. Make it yours in this order:
 
-1. **Rewrite the search prompt for you.** `deep_research_prompt.md` opens with
-   a Candidate section, target titles, and non-negotiable filters (location,
+1. **Rewrite the search prompt.** `deep_research_prompt.md` opens with a
+   Candidate section, target titles, and non-negotiable filters (location,
    salary, industry) that describe *my* search — replace those with yours and
    keep the rest: the Sources, Output, and Liveness sections are the
    load-bearing search machinery and are candidate-agnostic. Once you start
    reviewing postings, the weekly [`jsa refine` loop](#refining-the-search-prompt-from-ground-truth)
    keeps tuning the criteria from your own feedback.
-2. **Seed a resume template library.** `resume_templates/` (gitignored, so you
+2. **Set the search cadence.** `pipeline.CRON_SCHEDULE` maps each ET weekday
+   to the searches the cloud cron runs that day. The committed cadence
+   (Perplexity Mon/Wed/Fri, a Claude sweep first on Fridays) is a starting
+   point, not a requirement.
+3. **Seed a resume template library.** `resume_templates/` (gitignored, so you
    start empty) holds one polished `.docx` resume per role family you apply
    to — e.g. `customer-education.docx`. `jsa generate` picks one per job and
-   patches it. Also rewrite the persona and role families at the top of
-   `tailoring_prompt.md`, which currently name mine.
-3. **Create your own tracker Sheet.** Make a Google Sheet with an
+   patches it. The tailoring prompt itself is candidate-agnostic; the one
+   vocabulary to align is the role-category list shared by
+   `tailoring_prompt.md`, `bullet_sync_prompt.md`, and the bullet library.
+4. **Seed the vault files.** Three hand-curated files live beside your
+   application packets (`~/Documents/Job Applications` by default;
+   `JSA_PACKETS_DIR` to move it): `resume_tailoring_rules.md` — constraints
+   the tailorer must honor, such as an entry it must never touch or how one
+   title may be worded; `resume_voice.md` — summaries you wrote yourself,
+   matched for register; and `resume_bullets.csv` — every bullet you have
+   sent (build it, then run `jsa bullets --baseline`). Each is optional and
+   degrades to a placeholder in the prompt.
+5. **Create your own tracker Sheet.** Make a Google Sheet with an
    `Applications` tab whose header row is the eight columns described in
    `prd.md` (Application Tracker), put its id in `JSA_TRACKER_SPREADSHEET_ID`
    in `.env`, and install the [`gws`](https://github.com/googleworkspace/cli)
    CLI (`gws auth login`). There is deliberately no default Sheet id in the
    code — the Sheet-touching commands fail with a pointer here until you set it.
-4. **Provision your own cloud pieces.** `turso db create` for the database and
+   Publish the OAuth consent screen in the GCP project behind your `gws`
+   client, or its refresh token expires every seven days.
+6. **Provision your own cloud pieces.** `turso db create` for the database and
    `fly launch` for the search cron — Fly will prompt you for your own app name
    (the committed `fly.toml` carries mine, which is already taken). Both are
    step-by-step in [Deployment](#deployment-flyio--turso); the search runs fine
    locally via `uv run jsa search` before you ever deploy.
+7. **Wire the refinement loop's CI.** Add the repo secrets
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `CLAUDE_CODE_OAUTH_TOKEN` for
+   the weekly refine workflow, and `FLY_API_TOKEN` (`fly tokens create deploy`)
+   for the redeploy-on-merge workflow, then enable *Settings → Actions → Allow
+   GitHub Actions to create and approve pull requests*.
 
 Two local assumptions worth knowing: `jsa review` opens each posting with
 macOS's `open -a "Google Chrome"` (one line to change for another OS or
@@ -90,7 +108,7 @@ browser), and `jsa generate` renders PDFs with LibreOffice, so it needs
 ```bash
 uv run jsa init-db                              # create the postings table
 uv run jsa search                              # run one search (defaults to Perplexity, 48h window)
-uv run jsa search --agent perplexity --window-hours 72   # explicit agent + window
+uv run jsa search --agent claude --window-hours 72   # explicit agent + window
 uv run jsa add https://job-boards.greenhouse.io/acme/jobs/123   # add one posting by hand
 uv run jsa review                              # work through the fit-review backlog
 uv run jsa refetch --dry-run                   # report drift on Apply postings not yet applied to
@@ -106,27 +124,16 @@ uv run jsa track                               # append Apply postings to the Sh
 
 ### Adding a posting by hand
 
-`jsa add <URL>` runs a user-supplied posting through the *same* pipeline as a
-searched one — canonicalize, idempotent insert, full-JD capture — tagged
-`search_agent = 'manual'`.
-
-**It is decided `Apply` on arrival.** Supplying the URL is the decision, so the
-posting skips the review backlog and goes straight into the Step 4/5 queue,
-ready for `jsa generate`. Adding a URL already in the table promotes that row to `Apply`
-too (keeping any feedback you wrote about it), so handing over a posting you'd
-previously skipped is how you reverse that call.
-
-Company and title are pre-filled from the ATS record and the board slug for you
-to correct; `--company` / `--title` set them outright and `--no-input` skips the
-prompts.
-
-A URL on an unsupported ATS (Workday, a custom careers site) still works: the
-job description is captured from the page's schema.org JSON-LD, which most job
-pages embed so they can appear in Google Jobs. Capture order is supported ATS
-fetcher → JSON-LD → `NULL` — the platform's own record wins where it exists,
-since it is fuller and carries a structured location. This fallback is only for
-postings *you* hand over: it proves what a posting says, never that it's still
-open, so the search path doesn't use it.
+`jsa add <URL>` runs a posting you found yourself through the same pipeline as
+a searched one, tagged `search_agent = 'manual'`, and **decides it `Apply` on
+arrival** — supplying the URL is the decision, so it skips review and goes
+straight into the Step 4/5 queue. Re-adding a URL already in the table
+promotes that row to `Apply` (keeping any feedback you wrote), which is how
+you reverse an earlier `Skip`. Company and title are pre-filled from the ATS
+record for you to correct; `--company` / `--title` set them outright and
+`--no-input` skips the prompts. A URL on an unsupported ATS still works: the
+job description is captured from the page's schema.org JSON-LD when the
+platform's own record is unavailable (`prd.md`, Direct Job Add).
 
 ### Reviewing
 
@@ -148,37 +155,15 @@ Ctrl-X Ctrl-E opens `$EDITOR` for a long comment.
 
 ### Keeping postings in sync
 
-Employers edit reqs in place. A Stepful posting in this database was retitled
-from "Fractional GTM Enablement Lead" to "Fractional Sales Enablement Lead"
-under an unchanged URL and posted-date. Since the job description is captured
-once at insert time (deliberately — it has to be captured while the posting is
-alive), a row can drift from its source.
-
-`jsa refetch` re-reads the ATS record and re-applies the insert's rule: the
-ATS-canonical title wins and `title_slug` is re-derived from it, with the
-description and location refreshed alongside. A failed fetch leaves the row
-untouched rather than trading a good capture for a blip, and a posting that has
-vanished from its board is reported, not deleted.
-
-It focuses on the postings where drift could still change what you do next:
-`Apply` rows that are either absent from the tracker Sheet *or* sitting there
-without a `Date Applied`. The database is the source of truth and the tracker
-is its human-readable projection, so a corrected title is also written back to
-the tracker row's Title cell (matched by the ID column) when the job hasn't
-been applied to — and once you *have* applied, the row is skipped entirely and
-its sheet copy stays frozen as the record of what you submitted. The Sheet
-index read fails loudly in the default scope rather than guessing; under
-`--id`/`--all` it's best-effort and only enables the Title refresh.
-
-If the job already has a packet directory, a title or JD change **rebuilds
-it**: refetch hands the row to `jsa generate`, which regenerates the packet —
-resume included — at the (possibly renamed) new path, and only then is the
-old directory removed. The packet is a derived artifact (the resume is a
-function of the base resume plus the JD), so the stale copy is deleted rather
-than archived; build-before-delete means a failed regeneration never deletes
-anything (it's flagged for a manual `jsa generate --id`). The delete only
-ever targets the exact expected old directory, and a location-only change
-touches nothing.
+Employers edit reqs in place under an unchanged URL. `jsa refetch` re-reads the
+ATS record for `Apply` postings you have not applied to yet (absent from the
+tracker Sheet, or there without a `Date Applied`) and re-applies the insert's
+rule: the ATS-canonical title wins, with the description and location
+refreshed alongside. A corrected title is written back to the tracker row's
+Title cell, and a job that already has a packet directory is rebuilt —
+resume included — at its new path before the old one is removed. A failed
+fetch leaves the row untouched, and a posting that has vanished from its
+board is reported, not deleted (`prd.md`, Posting Drift and Re-fetch).
 
 ```bash
 uv run jsa refetch --dry-run   # what has changed upstream, without writing
@@ -189,14 +174,12 @@ uv run jsa refetch --id 42     # one row, selected unconditionally
 
 ### Preparing application packets
 
-`jsa packet` builds the per-job application-packet directory — the
-deterministic first half of Step 4, useful when you want the directory and JD
-on disk without a model call. For each `Apply` posting not yet in the tracker
-it creates `~/Documents/Job Applications/{Company} - {Title}` with a
-fail-if-exists `mkdir` (an existing packet is skipped, never clobbered) and
-writes the captured job description inside as `job_posting.md`. `--id` builds
-the packet for a row that's already tracked (rows tracked under the earlier
-track-on-Apply flow predate their packets).
+`jsa packet` creates the per-job directory
+`~/Documents/Job Applications/{Company} - {Title}` and writes the captured job
+description inside as `job_posting.md` — the deterministic first half of
+Step 4, for when you want the directory and JD on disk without a model call.
+An existing packet is skipped, never clobbered; `--id` builds the packet for a
+row that is already tracked.
 
 ```bash
 uv run jsa packet --dry-run    # what would be created
@@ -206,46 +189,26 @@ uv run jsa packet --id 42      # one packet, even if the row is already tracked
 ### Generating resumes
 
 `jsa generate` is Step 4. For each `Apply` posting not yet in the tracker it
-ensures the packet directory and `job_posting.md` (re-entering a bare
-directory left by an interrupted run or a refetch rebuild — the completion
-guard is `added_to_tracker`, not directory-exists), tailors the best-fit
-template from the `resume_templates/` library with a headless render-loop
-agent, and writes into the packet:
-
-- the tailored resume as `.docx` **and** `.pdf` (LibreOffice headless renders
-  the PDF); file names carry no spaces, the directory name does;
-- `resume_changelog.md` — one addressable entry per change with its
-  rationale, rendered from the patch that was actually applied.
-
-The model (pinned `claude-fable-5`, medium effort) never edits a file: it
-sees every template in the library (one maintained resume per role family) as
-numbered paragraphs, picks the one whose family fits the posting — the pick and its
-rationale land in the changelog — and submits **structured JSON patches**
-(replace / insert / delete / move per paragraph, `**bold**` inline) to an
-in-process `render_resume` tool. The tool applies each patch
-deterministically to a fresh copy of the template via `python-docx`, renders
-the PDF (LibreOffice headless), and reports the page count back; the model
-iterates until the resume fits a hard **two-page budget** with no orphaned
-role headers. Verifying the budget against a real render is the point of the
-loop — reruns aren't bit-identical, but the formatting can't break and every
-change is a named, addressable op. The library
-expands outward rather than force-fitting: when no family matches, the model
-declares a new one, starts from the nearest template, and the tailored
-result is saved back as the new family's template (flagged for review). The
-tailoring instructions live in `tailoring_prompt.md`; the op-based patch
-contract inline there is load-bearing.
+ensures the packet directory, tailors the best-fit template from your
+`resume_templates/` library with a headless render-loop agent, and writes the
+tailored resume as `.docx` **and** `.pdf` plus a `resume_changelog.md` with
+one entry per change and its rationale. The model never edits a file: it
+submits structured patches to a tool that applies them to a fresh copy of the
+template, renders the PDF, and reports the page count back, iterating until
+the resume fits a hard **two-page budget**. When no template's role family
+fits, the tailored result is saved back as a new template, flagged for review
+(`prd.md`, Resume Revisions).
 
 A row with no captured JD is skipped, never tailored blind — run
 `jsa refetch --id 42`, or paste the JD into the packet's `job_posting.md` by
-hand and re-run (that file is treated as input and is never overwritten). As
-its final action, `jsa generate` appends the row to the tracker Sheet
-(Step 5), so a job reaches the tracker only once a resume was actually
-drafted. The queue runs on a small worker pool (`JSA_GENERATE_WORKERS`,
-default 3); `--id` regenerates one row even if it's already tracked (the
-closing append no-ops).
+hand and re-run (that file is treated as input and never overwritten). As its
+final action, `jsa generate` appends the row to the tracker Sheet (Step 5), so
+a job reaches the tracker only once a resume was actually drafted. The queue
+runs on a small worker pool (`JSA_GENERATE_WORKERS`, default 3); `--id`
+regenerates one row even if it's already tracked.
 
-Requires the `resume_templates/` library at the repo root (gitignored — one
-`.docx` per role family) and LibreOffice (`soffice`) on PATH.
+Requires the `resume_templates/` library and LibreOffice (`soffice`) on PATH;
+the vault files from the checklist above are optional inputs.
 
 ```bash
 uv run jsa generate --dry-run  # preview the queue
@@ -255,21 +218,13 @@ uv run jsa generate --id 42    # one row, even if already tracked
 
 ### Maintaining the bullet library
 
-`resume_voice.md` — beside the packet directories, hand-curated — holds
-summaries Nicky wrote himself for earlier applications. `jsa generate`
-interpolates it into the tailoring prompt as the register to match, so the
-summary reads like him rather than like a model; the prompt also caps the
-summary's length and bans the constructions his hand edits always removed.
-
-`resume_bullets.csv` — living beside the packet directories — is the
-reconciled record of every bullet across every resume actually sent: one row
-per bullet, organized by employer role, with a canonical `best` wording per
-claim and substantively different framings kept as variants. `jsa generate`
-feeds it to the tailoring model as ground truth, so new resumes reuse vetted
-claims instead of re-paraphrasing them. `jsa bullets` keeps it current: it
-scans for resume files modified since the last recorded sync run (tracked in
-the database, like the refinement loop) and has a headless agent (pinned
-`claude-sonnet-5`, medium effort) fold the missing bullets into the CSV.
+`resume_bullets.csv` — beside the packet directories — records every bullet
+across every resume actually sent, one canonical wording per claim with
+substantively different framings kept as variants. `jsa generate` feeds it to
+the tailoring model so new resumes reuse vetted claims instead of
+re-paraphrasing them. `jsa bullets` keeps it current: it scans for resume
+files modified since the last recorded sync and has a headless agent fold the
+missing bullets into the CSV.
 
 ```bash
 uv run jsa bullets --dry-run   # list the resumes in scope
@@ -279,29 +234,24 @@ uv run jsa bullets --baseline  # mark the current state as synced (after hand-cu
 
 ### Refining the search prompt from ground truth
 
-Every review decision — and every JD behind it — is labeled training data
-for the search prompt. A weekly GitHub Actions workflow runs `jsa refine`:
-it pulls only the postings decided since the last run (tracked in the
-database, not the prompt — the prompt stays a standalone brief), hands the
-refiner agent (pinned `claude-opus-4-8`) the feedback, the manually-added
-postings the search missed, and the full JDs to mine for implicit patterns,
-and opens a **pull request** with whatever prompt edits it proposes. Nothing
-merges without human review — that PR review is the guardrail. The same loop
-runs by hand as `uv run jsa refine`.
+Every review decision — and every JD behind it — is labeled training data for
+the search prompt. A weekly GitHub Actions workflow runs `jsa refine`: it
+pulls only the postings decided since the last run, hands the refiner agent
+the feedback, the hand-added postings the search missed, and the full JDs to
+mine for implicit patterns, and opens a **pull request** with whatever prompt
+edits it proposes. Nothing merges without human review. The same loop runs by
+hand as `uv run jsa refine`; `--dry-run` previews the scope.
 
 ### Elevating to the tracker
 
 `jsa track` appends every `Apply` posting that isn't in the tracker yet to the
-Google Sheet, then flags the row `added_to_tracker = 1`. Each row leads with
-the database id (column A), which is how `jsa refetch` matches Sheet rows back
-to postings. The flag is set **only**
-after the Sheets API confirms the append, so a failure leaves the posting in the
-backlog rather than silently dropping it; re-running never double-appends.
-The write shells out to the local [`gws`](https://github.com/googleworkspace/cli)
-CLI, which holds the Google OAuth token — that credential stays off the Fly.io
-server by design. The target Sheet is your own, via `JSA_TRACKER_SPREADSHEET_ID`
-(see [Using this for your own search](#using-this-for-your-own-search)). If
-`gws` reports an expired grant, re-run `gws auth login`.
+Google Sheet and flags the row only after the Sheets API confirms the append,
+so a failure leaves the posting in the backlog rather than silently dropping
+it. Each row leads with the database id (column A), which is how `jsa refetch`
+matches Sheet rows back to postings. The write shells out to the local
+[`gws`](https://github.com/googleworkspace/cli) CLI, which holds the Google
+OAuth token — that credential stays off the Fly.io server by design. If `gws`
+reports an expired grant, re-run `gws auth login`.
 
 ```bash
 uv run jsa track --dry-run     # print the exact rows without writing
@@ -328,7 +278,7 @@ turso db tokens create job-search-agent       # -> TURSO_AUTH_TOKEN
 Put both in your local `.env`, then `uv run jsa init-db` to create the table.
 
 **2. Claude + Perplexity auth.** Every Claude service here (the weekly deep-research
-search, `jsa generate`, `jsa refine`) drives the Claude Agent SDK, so they
+search, `jsa generate`, `jsa bullets`, `jsa refine`) drives the Claude Agent SDK, so they
 authenticate with a subscription OAuth token from `claude setup-token`, read from
 `CLAUDE_CODE_OAUTH_TOKEN` — usage draws from the plan, not per-call API billing.
 An [Anthropic API key](https://console.anthropic.com/) in `ANTHROPIC_API_KEY`
@@ -363,19 +313,15 @@ fly machine run . --schedule daily --restart on-fail --vm-memory 1024    # wakes
 ```
 
 The image's entrypoint is `jsa cron`, which **self-gates by ET weekday** against
-`pipeline.CRON_SCHEDULE`: it runs **Perplexity on Monday (72h, covering the
-weekend)**, **Wednesday (48h)**, and **Friday (48h)**, plus a weekly **Claude
-Deep Research sweep (168h) on Friday that runs first**, and exits quietly on
-every other day. So a single fuzzy `--schedule daily` machine produces the whole
-weekly cadence — Fly's scheduler has no weekday selector or per-run args, so the
-weekday logic lives in the container. Create the scheduled machine **at your intended morning hour** (the
-daily interval fires ~24h after creation). The windows overlap by design, so a
-missed or doubled fuzzy fire is harmless — re-inserts no-op on `canonical_url`.
-
-The A/B trial (Claude and Perplexity over the same window every search day) has
-concluded: Perplexity surfaced more qualifying roles, so it now carries the
-Mon/Wed/Fri cadence while Claude is kept as a weekly Friday sweep. Per-agent
-attribution still lands in `search_findings`; `jsa ab-report` summarizes it.
+`pipeline.CRON_SCHEDULE` and exits quietly on days with no search, so a single
+fuzzy `--schedule daily` machine produces the whole weekly cadence — Fly's
+scheduler has no weekday selector or per-run args, so the weekday logic lives
+in the container. Create the scheduled machine **at your intended morning
+hour** (the daily interval fires ~24h after creation). The windows overlap by
+design, so a missed or doubled fuzzy fire is harmless — re-inserts no-op on
+`canonical_url`. Per-agent attribution lands in `search_findings` as raw
+telemetry for search-quality evaluation (the `analysis/` R script is one
+example); the pipeline ships no built-in report over it.
 
 > **Cost note:** watch the first few Friday (Claude Opus) runs' spend before
 > trusting the cron unattended.
@@ -435,31 +381,26 @@ redeploy — a code change ships on the next manual run of the steps above.
 This repo is also a worked example of how I build with AI coding tools.
 
 **Spec before code.** The system was fully specified in prose before a line of
-Python existed. [`prd.md`](./prd.md) is the source of truth; [`TODO.md`](./TODO.md)
-is a running decision log where open questions live as checkboxes until they're
-resolved (and *why* they resolved the way they did). Load-bearing choices — the
-cloud/local split, one hosted database with no copies, a single idempotency
-mechanism, four supported ATS platforms as an inclusion criterion — were argued
-out in that doc, not discovered mid-implementation.
+Python existed. [`prd.md`](./prd.md) is the source of truth and a living
+document: it describes the present design and the rationale that holds it up,
+rewritten in place as decisions change, with the git log as the only archive.
+Load-bearing choices — the cloud/local split, one hosted database with no
+copies, a single idempotency mechanism, four supported ATS platforms as an
+inclusion criterion — were argued out there, not discovered mid-implementation.
 
 **Plan, then execute in reviewable slices.** Implementation followed an approved
 plan built in phases (data layer → ATS capture → search runners → pipeline/CLI
-→ review loop → deployment), each ending in a green lint pass and a single
-focused commit that references the PRD section it implements. The git history is
-meant to be read.
+→ review loop → deployment → resume generation → learning loops), each ending
+in a green lint pass and a focused commit that references the PRD section it
+implements. The git history is meant to be read.
 
 **Verify against reality, not just types.** The four ATS fetchers were validated
-live end-to-end against real public boards (GitLab/Greenhouse, Lever, Ashby,
-Rippling) before being trusted — which is how the Rippling detail-record shape
-(a `role`+`company` HTML dict, not a plain string) and the canonical-title /
-`title_slug` consistency gap were caught and fixed, with the fixes fed back into
-`prd.md`.
-
-**Design principles in the code.** Pure logic (URL canonicalization, name
-derivation, output parsing, ATS URL resolution) is kept free of I/O so it is
-trivially testable; the single idempotency mechanism is enforced at the database
-layer; and failures in full-JD capture degrade gracefully (a row inserts with a
-`NULL` description rather than being dropped).
+live against real public boards before being trusted — which is how the
+Rippling detail-record shape and the canonical-title consistency gap were
+caught and fixed, with the fixes fed back into `prd.md`. The repo deliberately
+ships no agent-authored tests: a suite written in the same loop as the code
+only mirrors what that loop already believed, so pure logic is kept I/O-free
+and every external tool is overridable for a test suite written separately.
 
 ## Project layout
 
@@ -469,18 +410,25 @@ src/jsa/
   canonicalize.py    URL -> canonical idempotency key (pure)
   naming.py          filesystem-safe company / title-slug derivation (pure)
   models.py          pydantic models for the postings JSON contract
-  db.py              the single Turso `postings` table + idempotent insert
-  ats/               full-JD capture: resolve URL -> fetch detail -> HTML->MD
+  db.py              the single Turso `postings` table + idempotent insert + migrations
+  ats/               full-JD capture: resolve URL -> fetch detail -> HTML->MD (+ JSON-LD fallback)
   search/            Step 1 runners (Claude / Perplexity) + prompt + parser
-  pipeline.py        Steps 1->2 orchestration
+  pipeline.py        Steps 1->2 orchestration + the weekly cron cadence
   manual.py          direct job add: one user-supplied URL through Step 2
   review.py          Step 3 deterministic review loop
+  prompting.py       line-edited terminal input shared by the local commands
   refetch.py         reconcile stored postings against their (mutable) ATS record
   packet.py          Step 4's deterministic head: create + seed the packet directory
   generate.py        Step 4: render-loop resume tailoring (structured patch) + track
   docx_patch.py      applies the tailoring patch to the .docx (pure)
-  refine.py          the ground-truth prompt-refinement loop (weekly PR via CI)
-  prompting.py       line-edited terminal input shared by the local commands
   tracker.py         Step 5 write to the Google Sheet application tracker
+  bullets.py         the bullet ground-truth library sync
+  refine.py          the ground-truth prompt-refinement loop (weekly PR via CI)
+  agent.py           the headless Agent SDK scaffolding shared by generate / bullets / refine
   cli.py             the `jsa` command-line entry point
+deep_research_prompt.md   the search prompt (Steps 1-2); baked into the cloud image
+tailoring_prompt.md       the resume-tailoring instructions (Step 4)
+bullet_sync_prompt.md     the bullet-library reconciliation rules
+refine_search_prompt.md   the refiner agent's instructions
+analysis/                 an R script over the search_findings telemetry (renv-managed)
 ```

@@ -12,9 +12,8 @@ run: fold the bullets from the new/modified resumes below into the library.
 Read it first, in full. Columns:
 
 - `employer_role` — the employer + position the bullet belongs to, matching
-  the resume's role headers (e.g. `Keywell — Customer Success Manager & Chief
-  of Staff`). Rows are grouped by role, in resume (reverse-chronological)
-  order.
+  the resume's role headers (e.g. `Acme — Customer Success Manager`). Rows
+  are grouped by role, in resume (reverse-chronological) order.
 - `claim` — a short label for the underlying achievement, shared by every
   wording of it.
 - `version` — `best` (the canonical wording of the claim) or `variant` (a
@@ -25,8 +24,8 @@ Read it first, in full. Columns:
 - `bullet` — the full bullet text, verbatim, with `**bold**` markers
   preserved.
 - `source_resumes` — the company portion of each source packet's directory
-  name, semicolon-separated (e.g. `Affirm`); when one company has several
-  resumes, a short parenthetical disambiguates (e.g. `GitLab (Manager CS)`).
+  name, semicolon-separated (e.g. `Acme`); when one company has several
+  resumes, a short parenthetical disambiguates (e.g. `Acme (Manager CS)`).
 - `notes` — reconciliation notes (e.g. what distinguishes a variant).
 
 ## The resumes to fold in

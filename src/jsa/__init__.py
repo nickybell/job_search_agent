@@ -14,6 +14,9 @@ Package layout mirrors the PRD's numbered flow (Steps 1–5):
 - ``generate.py`` — Step 4: the render-loop resume tailoring (``jsa generate``).
 - ``docx_patch.py`` — applies the structured tailoring patch to the ``.docx``.
 - ``tracker.py`` — Step 5: appending ``Apply`` rows to the Google Sheet tracker.
+- ``bullets.py`` — keeps the bullet ground-truth library current (``jsa bullets``).
+- ``refine.py`` — the ground-truth search-prompt refinement loop (``jsa refine``).
+- ``agent.py`` — the headless Agent SDK scaffolding the three agentic commands share.
 """
 
 __version__ = "0.1.0"

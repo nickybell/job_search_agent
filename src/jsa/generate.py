@@ -7,13 +7,13 @@ reusing the pure helpers ``jsa packet`` is built from, but with *ensure*
 semantics rather than that command's standalone fail-if-exists skip: a bare
 directory left by an interrupted run or a ``jsa refetch`` rebuild is re-entered
 and completed, because the completion guard is ``added_to_tracker``, not
-directory-exists (prd.md, revised 2026-08-21). It then tailors the resume in
-one pass, renders the ``.docx``/``.pdf`` pair, writes ``resume_changelog.md``,
-and finishes by invoking the Step 5 tracker append for that row — the seam
-between Steps 4 and 5.
+directory-exists. It then tailors the resume in one pass, renders the
+``.docx``/``.pdf`` pair, writes ``resume_changelog.md``, and finishes by
+invoking the Step 5 tracker append for that row — the seam between Steps 4
+and 5.
 
-The tailoring mechanism (decided 2026-08-21) is a **structured patch** over a
-**curated template library** (decided 2026-08-22): ``resume_templates/`` holds
+The tailoring mechanism is a **structured patch** over a **curated template
+library**: ``resume_templates/`` holds
 one maintained ``.docx`` per role family, and the model call — the Claude
 Agent SDK, headless, pinned to ``claude-fable-5`` at ``medium`` effort, no
 inherited session state — sees *every* template as numbered paragraphs, names
@@ -35,7 +35,12 @@ It likewise interpolates the voice samples — ``resume_voice.md`` in the
 packets directory (``JSA_VOICE_DOC`` to override), a hand-curated file of
 summaries the user wrote for earlier applications — as ``{{VOICE_SAMPLES}}``,
 so the summary is written in the user's register rather than the model's. A
-missing file degrades the same way.
+missing file degrades the same way. A third hand-curated file,
+``resume_tailoring_rules.md`` (``JSA_TAILORING_RULES_DOC`` to override),
+carries the candidate-specific constraints — a protected entry, a title-wording
+rule — as ``{{TAILORING_RULES}}``, so the general instructions in
+``tailoring_prompt.md`` never name an employer. ``JSA_CANDIDATE_NAME``, when
+set, prefixes the resume file names.
 
 A row with no captured JD is never tailored blind: its directory is ensured,
 but the tailoring and the tracker call are skipped and the row stays in the
@@ -65,19 +70,12 @@ from datetime import datetime
 from pathlib import Path
 
 import anyio
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ResultMessage,
-    TextBlock,
-    create_sdk_mcp_server,
-    query,
-    tool,
-)
+from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, tool
 from docx import Document
 from pypdf import PdfReader
 
 from . import db
+from .agent import REPO_ROOT, collect_final_text, prompt_path
 from .bullets import bullet_library_path
 from .config import Config
 from .docx_patch import (
@@ -88,7 +86,7 @@ from .docx_patch import (
     render_changelog,
     render_numbered_text,
 )
-from .packet import packet_dir_name, packets_dir, write_job_posting
+from .packet import packet_dir_name, packets_dir, vault_file, write_job_posting
 from .search.prompt import EASTERN
 from .tracker import TrackerError, run_tracker
 
@@ -119,25 +117,12 @@ class GenerateError(RuntimeError):
     """A precondition failed loudly (empty template library, missing prompt or soffice)."""
 
 
-def _repo_root() -> Path:
-    # src/jsa/generate.py -> repo root is two parents up from src/jsa.
-    return Path(__file__).resolve().parents[2]
-
-
-def _default_prompt_path() -> Path:
-    """Locate ``tailoring_prompt.md`` (repo root, same pattern as the search prompt)."""
-    cwd_candidate = Path.cwd() / _PROMPT_FILENAME
-    if cwd_candidate.is_file():
-        return cwd_candidate
-    return _repo_root() / _PROMPT_FILENAME
-
-
 def resume_templates_dir() -> Path:
     """The template library — gitignored at the repo root; env override for tests."""
     override = os.environ.get("JSA_RESUME_TEMPLATES_DIR")
     if override:
         return Path(override)
-    return _repo_root() / "resume_templates"
+    return REPO_ROOT / "resume_templates"
 
 
 def load_template_paths() -> dict[str, Path]:
@@ -193,15 +178,20 @@ def _worker_count() -> int:
     return _DEFAULT_WORKERS
 
 
-def resume_file_stem(normalized_company: str, title_slug: str) -> str:
+def candidate_name() -> str | None:
+    """The candidate's name for resume file names (``JSA_CANDIDATE_NAME``), if set."""
+    return os.environ.get("JSA_CANDIDATE_NAME") or None
+
+
+def resume_file_stem(normalized_company: str, title_slug: str, candidate: str | None = None) -> str:
     """The resume file name (no extension). Pure.
 
-    Per prd.md: space characters are removed from the resume file names, but
-    not from the containing directory name.
+    ``{Candidate}_Resume_{title}_{company}`` when a candidate name is given,
+    ``Resume_{title}_{company}`` otherwise. Per prd.md, space characters are
+    removed from the file name but not from the containing directory name.
     """
-    title_part = title_slug.replace(" ", "")
-    company_part = normalized_company.replace(" ", "")
-    return f"NicholasBell_Resume_{title_part}_{company_part}"
+    parts = (candidate, "Resume", title_slug, normalized_company)
+    return "_".join(part.replace(" ", "") for part in parts if part)
 
 
 def load_bullet_library() -> str | None:
@@ -210,19 +200,27 @@ def load_bullet_library() -> str | None:
 
 
 VOICE_FILENAME = "resume_voice.md"
+RULES_FILENAME = "resume_tailoring_rules.md"
 
 
 def voice_samples_path() -> Path:
     """Where the voice samples live: the packets directory, or ``JSA_VOICE_DOC``."""
-    override = os.environ.get("JSA_VOICE_DOC")
-    if override:
-        return Path(override)
-    return packets_dir() / VOICE_FILENAME
+    return vault_file("JSA_VOICE_DOC", VOICE_FILENAME)
 
 
 def load_voice_samples() -> str | None:
     """The hand-curated voice samples' raw text, or None when the file is absent."""
     return _read_optional(voice_samples_path())
+
+
+def tailoring_rules_path() -> Path:
+    """The candidate-specific rules: the packets directory, or ``JSA_TAILORING_RULES_DOC``."""
+    return vault_file("JSA_TAILORING_RULES_DOC", RULES_FILENAME)
+
+
+def load_tailoring_rules() -> str | None:
+    """The hand-written tailoring rules' raw text, or None when the file is absent."""
+    return _read_optional(tailoring_rules_path())
 
 
 def _read_optional(path: Path) -> str | None:
@@ -240,10 +238,11 @@ def load_tailoring_prompt(
     templates_text: str,
     bullet_library: str | None = None,
     voice_samples: str | None = None,
+    tailoring_rules: str | None = None,
     path: Path | None = None,
 ) -> str:
     """Read the tailoring prompt template and fill its per-job slots."""
-    path = path or _default_prompt_path()
+    path = path or prompt_path(_PROMPT_FILENAME)
     text = path.read_text(encoding="utf-8")
     return (
         text.replace("{{JOB_TITLE}}", title)
@@ -252,6 +251,63 @@ def load_tailoring_prompt(
         .replace("{{RESUME_TEMPLATES}}", templates_text)
         .replace("{{BULLET_LIBRARY}}", bullet_library or "(no bullet library available)")
         .replace("{{VOICE_SAMPLES}}", voice_samples or "(no voice samples available)")
+        .replace("{{TAILORING_RULES}}", tailoring_rules or "(none)")
+    )
+
+
+@dataclass(frozen=True)
+class TailoringContext:
+    """The per-run inputs every queued row shares, read once in the preflight."""
+
+    templates: dict[str, Path]
+    templates_text: str
+    prompt_file: Path
+    bullet_library: str | None
+    voice_samples: str | None
+    tailoring_rules: str | None
+
+
+def load_context() -> TailoringContext:
+    """Preflight, loud and up front: half a queue failing row by row helps nobody.
+
+    The templates' numbered text is rendered once here (read-only); each
+    worker re-opens the chosen template fresh, since ``apply_patch`` mutates
+    the Document. The three hand-curated vault files are optional and degrade
+    to a logged note.
+    """
+    templates = load_template_paths()
+    bullet_library = load_bullet_library()
+    if bullet_library is None:
+        log.warning(
+            "no bullet library at %s — tailoring without the cross-application "
+            "ground truth (build it, then seed with `jsa bullets --baseline`)",
+            bullet_library_path(),
+        )
+    voice_samples = load_voice_samples()
+    if voice_samples is None:
+        log.warning(
+            "no voice samples at %s — the summary will be written without the "
+            "user's register to match",
+            voice_samples_path(),
+        )
+    tailoring_rules = load_tailoring_rules()
+    if tailoring_rules is None:
+        log.info("no candidate-specific tailoring rules at %s", tailoring_rules_path())
+    prompt_file = prompt_path(_PROMPT_FILENAME)
+    if not prompt_file.is_file():
+        raise GenerateError(f"tailoring prompt not found at {prompt_file}.")
+    if shutil.which(soffice_binary()) is None:
+        raise GenerateError(
+            f"the {soffice_binary()!r} CLI was not found on PATH — rendering the "
+            "PDF needs LibreOffice (headless)."
+        )
+    return TailoringContext(
+        templates=templates,
+        templates_text=render_templates_text(templates),
+        prompt_file=prompt_file,
+        bullet_library=bullet_library,
+        voice_samples=voice_samples,
+        tailoring_rules=tailoring_rules,
     )
 
 
@@ -325,19 +381,7 @@ async def _run_tailoring_agent(prompt: str, apply_render: ApplyRenderFn) -> str:
         permission_mode="bypassPermissions",
         max_turns=_MAX_TAILOR_TURNS,
     )
-    final_text = ""
-    assistant_text: list[str] = []
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_text.append(block.text)
-        elif isinstance(message, ResultMessage):
-            final_text = getattr(message, "result", "") or ""
-            cost = getattr(message, "total_cost_usd", None)
-            if cost is not None:
-                log.info("tailoring call finished ($%.4f)", cost)
-    return final_text or "\n".join(assistant_text)
+    return await collect_final_text(prompt, options, GenerateError, "tailoring agent")
 
 
 def run_tailoring_model(prompt: str, apply_render: ApplyRenderFn) -> str:
@@ -498,50 +542,12 @@ def run_generate(
         for row in rows:
             results.append(_preview_one(row, base))
     else:
-        # Preflight, loud and up front: half a queue failing row by row on a
-        # missing binary or file helps nobody. The templates' numbered text is
-        # rendered once here (read-only); each worker re-opens the chosen
-        # template fresh, since apply_patch mutates the Document.
-        templates = load_template_paths()
-        templates_text = render_templates_text(templates)
-        bullet_library = load_bullet_library()
-        if bullet_library is None:
-            log.warning(
-                "no bullet library at %s — tailoring without the cross-application "
-                "ground truth (build it, then seed with `jsa bullets --baseline`)",
-                bullet_library_path(),
-            )
-        voice_samples = load_voice_samples()
-        if voice_samples is None:
-            log.warning(
-                "no voice samples at %s — the summary will be written without the "
-                "user's register to match",
-                voice_samples_path(),
-            )
-        prompt_path = _default_prompt_path()
-        if not prompt_path.is_file():
-            raise GenerateError(f"tailoring prompt not found at {prompt_path}.")
-        if shutil.which(soffice_binary()) is None:
-            raise GenerateError(
-                f"the {soffice_binary()!r} CLI was not found on PATH — rendering the "
-                "PDF needs LibreOffice (headless)."
-            )
+        context = load_context()
         base.mkdir(parents=True, exist_ok=True)
-
         track_lock = threading.Lock()
 
         def worker(row: tuple) -> GenerateResult:
-            return _generate_one(
-                row,
-                config,
-                templates,
-                templates_text,
-                bullet_library,
-                voice_samples,
-                prompt_path,
-                tailor,
-                track_lock,
-            )
+            return _generate_one(row, config, context, tailor, track_lock)
 
         max_workers = min(_worker_count(), len(rows))
         if max_workers <= 1:
@@ -582,11 +588,7 @@ def _preview_one(row: tuple, base: Path) -> GenerateResult:
 def _generate_one(
     row: tuple,
     config: Config,
-    templates: dict[str, Path],
-    templates_text: str,
-    bullet_library: str | None,
-    voice_samples: str | None,
-    prompt_path: Path,
+    context: TailoringContext,
     tailor: TailorFn,
     track_lock: threading.Lock,
 ) -> GenerateResult:
@@ -622,15 +624,16 @@ def _generate_one(
             title=title,
             company=company,
             jd_markdown=jd,
-            templates_text=templates_text,
-            bullet_library=bullet_library,
-            voice_samples=voice_samples,
-            path=prompt_path,
+            templates_text=context.templates_text,
+            bullet_library=context.bullet_library,
+            voice_samples=context.voice_samples,
+            tailoring_rules=context.tailoring_rules,
+            path=context.prompt_file,
         )
-        stem = resume_file_stem(normalized_company, title_slug)
+        stem = resume_file_stem(normalized_company, title_slug, candidate_name())
         docx_path = directory / f"{stem}.docx"
         state = _RenderState()
-        apply_render = _make_apply_render(templates, docx_path, state)
+        apply_render = _make_apply_render(context.templates, docx_path, state)
         log.info(
             "[id %d] tailoring resume for %s — %s (%s)", result.posting_id, company, title, MODEL
         )
@@ -648,7 +651,7 @@ def _generate_one(
 
         # 3. The outward-expansion rule, then the changelog rendered from the
         # applied patch (which flags any new template for the curation scrub).
-        result.new_template = _maybe_save_new_family(patch, docx_path, templates)
+        result.new_template = _maybe_save_new_family(patch, docx_path, context.templates)
         changelog = render_changelog(
             company=company,
             title=title,
@@ -690,8 +693,8 @@ def _generate_one(
 def _maybe_save_new_family(patch, docx_path: Path, templates: dict[str, Path]) -> str | None:
     """Save the tailored resume as a new family template (the expansion rule).
 
-    The library expands outward rather than force-fitting (prd.md, decided
-    2026-08-22): when the model declares ``new_family``, the tailored output
+    The library expands outward rather than force-fitting (prd.md): when the
+    model declares ``new_family``, the tailored output
     seeds ``resume_templates/{slug}.docx`` and the changelog flags it for a
     curation scrub. Never clobbers: a slug already in the library means the
     family exists, so the declaration is dropped with a warning rather than

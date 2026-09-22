@@ -12,11 +12,12 @@ from dataclasses import dataclass
 
 import httpx
 
+from .. import __version__
 from .html_to_md import html_to_markdown
 from .resolve import ResolvedATS
 
 _TIMEOUT = httpx.Timeout(20.0)
-_HEADERS = {"User-Agent": "job-search-agent/0.1 (+https://github.com/nicky-bell)"}
+_HEADERS = {"User-Agent": f"job-search-agent/{__version__}"}
 
 
 @dataclass

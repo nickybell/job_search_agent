@@ -445,31 +445,5 @@ def track_command(posting_id: int | None, dry_run: bool) -> None:
         raise SystemExit(1)
 
 
-@main.command("ab-report")
-def ab_report_command() -> None:
-    """Summarize the A/B search trial: coverage, overlap, and Apply precision."""
-    config = load_config()
-    client = db.connect(config)
-    try:
-        report = db.ab_report(client)
-    finally:
-        client.close()
-
-    click.echo("Coverage (distinct reqs found):")
-    for agent, n in report["coverage"]:
-        click.echo(f"  {agent:<11} {n}")
-
-    both, claude_only, perplexity_only = report["overlap"] or (0, 0, 0)
-    click.echo("Overlap:")
-    click.echo(f"  both            {both or 0}")
-    click.echo(f"  claude only     {claude_only or 0}")
-    click.echo(f"  perplexity only {perplexity_only or 0}")
-
-    click.echo("Apply precision (applies / decided):")
-    for agent, applies, decided in report["precision"]:
-        rate = f"{applies / decided:.0%}" if decided else "n/a"
-        click.echo(f"  {agent:<11} {applies}/{decided} ({rate})")
-
-
 if __name__ == "__main__":
     main()

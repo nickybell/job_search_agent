@@ -7,7 +7,7 @@
 # (advancing the scope cutoff) whether or not the PR merges; a run that finds
 # no new ground truth exits quietly and records nothing.
 #
-# Setup this workflow assumes (see TODO.md):
+# Setup this workflow assumes (README, "Using this for your own search"):
 #   - repo secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN
 #     (the last is the output of `claude setup-token` — an OAuth token, NOT an
 #     API key; the refiner drives the Claude Code CLI, which reads it from

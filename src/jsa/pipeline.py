@@ -59,6 +59,8 @@ class RunSummary:
 # window, and Claude runs *first* so its broad weekly pass lands before the
 # incremental Perplexity one. The windows deliberately overlap, so a skipped fire
 # is recovered by the next run (and re-inserts no-op on canonical_url).
+#
+# The cadence is a per-user setting: a fork sets its own days and windows here.
 CRON_SCHEDULE: dict[int, tuple[tuple[str, int], ...]] = {
     0: (("perplexity", 72),),  # Monday
     2: (("perplexity", 48),),  # Wednesday

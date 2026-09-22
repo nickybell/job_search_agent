@@ -21,7 +21,7 @@
 #      `fly machine` ignores fly.toml's [[vm]] block and 256MB hangs the Agent
 #      SDK's bundled CLI on `initialize`.
 #
-# Setup this workflow assumes (see TODO.md):
+# Setup this workflow assumes (README, "Using this for your own search"):
 #   - repo secret FLY_API_TOKEN — a Fly deploy token (`fly tokens create deploy`),
 #     scoped to this one app; it is the only credential this workflow needs.
 #   - the app already exists with one scheduled (`daily`) machine (README step 4).

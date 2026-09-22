@@ -624,48 +624,6 @@ def record_finding(
     )
 
 
-def ab_report(client: Connection) -> dict:
-    """Compute the A/B comparison from ``search_findings`` alone.
-
-    Attribution lives in the append-only ``search_findings`` log, not the
-    ``postings`` row's ``search_agent`` (which records only the first inserter),
-    so a req both agents found credits both. Returns coverage (distinct reqs per
-    agent), overlap (both / claude-only / perplexity-only), and per-agent Apply
-    precision, read from search_findings' own denormalized ``decision`` column
-    (kept current by ``sync_finding_decision``) rather than joined to
-    ``postings`` — a req whose postings row was later deleted or reset still
-    counts correctly.
-    """
-    coverage = client.execute(
-        "SELECT agent, COUNT(DISTINCT canonical_url) "
-        "FROM search_findings GROUP BY agent ORDER BY agent"
-    ).fetchall()
-    overlap = client.execute(
-        """
-        SELECT
-          SUM(CASE WHEN c = 1 AND p = 1 THEN 1 ELSE 0 END),
-          SUM(CASE WHEN c = 1 AND p = 0 THEN 1 ELSE 0 END),
-          SUM(CASE WHEN p = 1 AND c = 0 THEN 1 ELSE 0 END)
-        FROM (
-          SELECT canonical_url,
-            MAX(CASE WHEN agent = 'claude' THEN 1 ELSE 0 END) AS c,
-            MAX(CASE WHEN agent = 'perplexity' THEN 1 ELSE 0 END) AS p
-          FROM search_findings GROUP BY canonical_url
-        )
-        """
-    ).fetchone()
-    precision = client.execute(
-        """
-        SELECT agent,
-          SUM(CASE WHEN decision = 'Apply' THEN 1 ELSE 0 END) AS applies,
-          SUM(CASE WHEN decision IN ('Apply', 'Skip') THEN 1 ELSE 0 END) AS decided
-        FROM search_findings
-        GROUP BY agent ORDER BY agent
-        """
-    ).fetchall()
-    return {"coverage": coverage, "overlap": overlap, "precision": precision}
-
-
 def refinement_cutoff(client: Connection) -> str | None:
     """The last prompt-refinement run's ``run_at`` — the ground-truth cutoff."""
     row = client.execute("SELECT MAX(run_at) FROM prompt_refinement_runs").fetchone()

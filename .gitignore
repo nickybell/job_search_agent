@@ -27,5 +27,11 @@ build/
 # --- Reference clones (local pattern reference, not tracked) ---
 reference/
 
+# --- R analysis: generated plots and session files (renv/.gitignore keeps the library out) ---
+analysis/*.png
+.Rhistory
+.RData
+.Rproj.user/
+
 # --- OS ---
 .DS_Store

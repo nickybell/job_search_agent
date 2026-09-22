@@ -1,14 +1,31 @@
+# The image needs pyproject.toml, uv.lock, README.md, src/, and deep_research_prompt.md
+# (the Dockerfile's COPY lines); everything else only bloats the build context.
 .git
+.github
+.claude
 .venv
 __pycache__
 *.pyc
-*.db
-*.db-journal
-*.sqlite
-.env
-base_resume.docx
 .ruff_cache
 dist
 build
 *.egg-info
+*.db
+*.db-journal
+*.sqlite
+.env
 .DS_Store
+
+# Local-only material
+reference
+analysis
+renv
+renv.lock
+.Rprofile
+resume_templates
+base_resume.docx
+
+# Docs and the local-side prompts
+*.md
+!README.md
+!deep_research_prompt.md
